@@ -31,6 +31,7 @@ function setupFormListeners() {
     document.getElementById('login').addEventListener('submit', handleLogin);
     document.getElementById('signup').addEventListener('submit', handleSignup);
     document.getElementById('add-expense-form').addEventListener('submit', handleAddExpense);
+    document.getElementById('edit-expense-form').addEventListener('submit', handleEditExpense);
     document.getElementById('add-friend-form').addEventListener('submit', handleAddFriend);
     document.getElementById('settle-up-form').addEventListener('submit', handleSettleUp);
 
@@ -452,14 +453,18 @@ function updateExpensesList() {
         const payerName = expense.payer?.full_name || expense.payer?.email || 'Unknown';
         const date = new Date(expense.created_at).toLocaleDateString();
         return `
-            <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md">
-                <div>
+            <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md hover:bg-gray-50">
+                <div class="flex-1">
                     <p class="font-medium text-lg">${expense.description}</p>
                     <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
                     <p class="text-xs text-gray-500 mt-1">Split: ${expense.split_type}</p>
                 </div>
-                <div class="text-right">
+                <div class="flex items-center gap-4">
                     <p class="font-semibold text-lg text-emerald-600">$${expense.amount.toFixed(2)}</p>
+                    <div class="flex gap-2">
+                        <button onclick="openEditExpenseModal('${expense.id}')" class="text-blue-600 hover:text-blue-700 text-sm">Edit</button>
+                        <button onclick="deleteExpense('${expense.id}')" class="text-red-600 hover:text-red-700 text-sm">Delete</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -591,6 +596,186 @@ async function handleAddExpense(e) {
         // Re-enable button
         submitButton.disabled = false;
         submitButton.textContent = 'Add Expense';
+    }
+}
+
+async function deleteExpense(expenseId) {
+    if (!confirm('Are you sure you want to delete this expense? This cannot be undone.')) {
+        return;
+    }
+
+    // Delete expense participants first
+    const { error: participantsError } = await supabase
+        .from('expense_participants')
+        .delete()
+        .eq('expense_id', expenseId);
+
+    if (participantsError) {
+        showToast('Error deleting expense participants', 'error');
+        console.error(participantsError);
+        return;
+    }
+
+    // Delete expense
+    const { error: expenseError } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', expenseId);
+
+    if (expenseError) {
+        showToast('Error deleting expense', 'error');
+        console.error(expenseError);
+        return;
+    }
+
+    showToast('✓ Expense deleted successfully!', 'success');
+    await loadExpenses();
+    await updateDashboard();
+}
+
+function openEditExpenseModal(expenseId) {
+    const expense = expenses.find(e => e.id === expenseId);
+    if (!expense) {
+        showToast('Expense not found', 'error');
+        return;
+    }
+
+    // Store the expense ID for later
+    document.getElementById('edit-expense-form').dataset.expenseId = expenseId;
+
+    // Pre-fill the form
+    document.getElementById('edit-expense-description').value = expense.description;
+    document.getElementById('edit-expense-amount').value = expense.amount;
+    document.getElementById('edit-expense-paid-by').value = expense.paid_by;
+    document.getElementById('edit-expense-split-type').value = expense.split_type;
+
+    // Load participants
+    loadEditExpenseParticipants(expenseId);
+
+    document.getElementById('edit-expense-modal').classList.remove('hidden');
+}
+
+async function loadEditExpenseParticipants(expenseId) {
+    const { data, error } = await supabase
+        .from('expense_participants')
+        .select('user_id, share_amount')
+        .eq('expense_id', expenseId);
+
+    if (error) {
+        console.error('Error loading expense participants:', error);
+        return;
+    }
+
+    const participantIds = data.map(p => p.user_id);
+    const container = document.getElementById('edit-expense-participants');
+    const paidBySelect = document.getElementById('edit-expense-paid-by');
+
+    // Update paid by dropdown
+    paidBySelect.innerHTML = '<option value="">Select...</option>';
+    const currentUserName = currentUser.user_metadata?.full_name || currentUser.email;
+    paidBySelect.innerHTML += `<option value="${currentUser.id}">${currentUserName} (You)</option>`;
+    allUsers.forEach(user => {
+        const name = user.full_name || user.email;
+        paidBySelect.innerHTML += `<option value="${user.id}">${name}</option>`;
+    });
+
+    // Update participants checkboxes
+    container.innerHTML = `
+        <label class="flex items-center gap-2">
+            <input type="checkbox" value="${currentUser.id}" ${participantIds.includes(currentUser.id) ? 'checked' : ''} class="edit-participant-checkbox">
+            <span>${currentUserName} (You)</span>
+        </label>
+    `;
+
+    allUsers.forEach(user => {
+        const name = user.full_name || user.email;
+        container.innerHTML += `
+            <label class="flex items-center gap-2">
+                <input type="checkbox" value="${user.id}" ${participantIds.includes(user.id) ? 'checked' : ''} class="edit-participant-checkbox">
+                <span>${name}</span>
+            </label>
+        `;
+    });
+}
+
+async function handleEditExpense(e) {
+    e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    const expenseId = e.target.dataset.expenseId;
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Updating...';
+
+    try {
+        const description = document.getElementById('edit-expense-description').value;
+        const amount = parseFloat(document.getElementById('edit-expense-amount').value);
+        const paidBy = document.getElementById('edit-expense-paid-by').value;
+        const splitType = document.getElementById('edit-expense-split-type').value;
+
+        const selectedParticipants = Array.from(document.querySelectorAll('.edit-participant-checkbox:checked'))
+            .map(cb => cb.value);
+
+        if (selectedParticipants.length === 0) {
+            showToast('Please select at least one participant', 'error');
+            return;
+        }
+
+        let shares = {};
+
+        if (splitType === 'equal') {
+            const shareAmount = amount / selectedParticipants.length;
+            selectedParticipants.forEach(userId => {
+                shares[userId] = shareAmount;
+            });
+        }
+
+        // Update expense
+        const { error: expenseError } = await supabase
+            .from('expenses')
+            .update({
+                description,
+                amount,
+                paid_by: paidBy,
+                split_type: splitType
+            })
+            .eq('id', expenseId);
+
+        if (expenseError) {
+            showToast('Error updating expense', 'error');
+            console.error(expenseError);
+            return;
+        }
+
+        // Delete old participants
+        await supabase
+            .from('expense_participants')
+            .delete()
+            .eq('expense_id', expenseId);
+
+        // Insert new participants
+        const participants = Object.entries(shares).map(([userId, share]) => ({
+            expense_id: expenseId,
+            user_id: userId,
+            share_amount: share
+        }));
+
+        const { error: participantsError } = await supabase
+            .from('expense_participants')
+            .insert(participants);
+
+        if (participantsError) {
+            showToast('Error updating participants', 'error');
+            console.error(participantsError);
+            return;
+        }
+
+        showToast('✓ Expense updated successfully!', 'success');
+        closeEditExpenseModal();
+        await loadExpenses();
+        await updateDashboard();
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Update Expense';
     }
 }
 
@@ -795,6 +980,11 @@ function closeAddExpenseModal() {
     document.getElementById('add-expense-form').reset();
     document.getElementById('exact-amounts-container').innerHTML = '';
     document.getElementById('exact-amounts-container').classList.add('hidden');
+}
+
+function closeEditExpenseModal() {
+    document.getElementById('edit-expense-modal').classList.add('hidden');
+    document.getElementById('edit-expense-form').reset();
 }
 
 function openAddFriendModal() {
