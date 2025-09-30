@@ -455,8 +455,7 @@ async function loadExpenses() {
                 )
             )
         `)
-        .eq('user_id', currentUser.id)
-        .order('created_at', { foreignTable: 'expenses', ascending: false });
+        .eq('user_id', currentUser.id);
 
     if (error) {
         console.error('Error loading expenses:', error);
@@ -473,8 +472,12 @@ async function loadExpenses() {
 
     expenses = Array.from(expenseMap.values());
 
-    // Sort by most recent first
-    expenses.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    // Sort by most recent first (descending order)
+    expenses.sort((a, b) => {
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return dateB - dateA; // Most recent first
+    });
 
     // Load participants for each expense
     await Promise.all(expenses.map(async (expense) => {
@@ -555,7 +558,7 @@ function updateExpensesList() {
                 <div class="flex-1">
                     <p class="font-medium text-lg">${expense.description}</p>
                     <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
-                    <p class="text-xs text-gray-500 mt-1">Split (${expense.split_type}): ${participantNames}</p>
+                    <p class="text-xs text-gray-500 mt-1">Split (${expense.split_type === 'equal' ? 'equally' : expense.split_type}): ${participantNames}</p>
                 </div>
                 <div class="flex items-center gap-4">
                     <p class="font-semibold text-lg text-emerald-600">$${expense.amount.toFixed(2)}</p>
@@ -571,6 +574,8 @@ function updateExpensesList() {
 
 function handleSplitTypeChange(e) {
     const exactContainer = document.getElementById('exact-amounts-container');
+    const summaryContainer = document.getElementById('exact-amounts-summary');
+
     if (e.target.value === 'exact') {
         // Show exact amounts inputs
         const checkboxes = document.querySelectorAll('.participant-checkbox:checked');
@@ -585,8 +590,8 @@ function handleSplitTypeChange(e) {
             if (userId === currentUser.id) {
                 name = currentUser.user_metadata?.full_name || currentUser.email;
             } else {
-                const friend = friends.find(f => f.id === userId);
-                name = friend?.full_name || friend?.email || 'Unknown';
+                const user = allUsers.find(u => u.id === userId);
+                name = user?.full_name || user?.email || 'Unknown';
             }
 
             exactContainer.innerHTML += `
@@ -594,14 +599,46 @@ function handleSplitTypeChange(e) {
                     <label class="block text-sm text-gray-600 mb-1">${name}</label>
                     <input type="number" step="0.01" min="0" data-user-id="${userId}"
                         class="exact-amount-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        placeholder="0.00">
+                        placeholder="0.00"
+                        oninput="updateExactAmountsSummary()">
                 </div>
             `;
         });
 
         exactContainer.classList.remove('hidden');
+        summaryContainer.classList.remove('hidden');
+        updateExactAmountsSummary();
     } else {
         exactContainer.classList.add('hidden');
+        summaryContainer.classList.add('hidden');
+    }
+}
+
+function updateExactAmountsSummary() {
+    const totalAmount = parseFloat(document.getElementById('expense-amount').value) || 0;
+    const currency = document.getElementById('expense-currency').value;
+    const exactInputs = document.querySelectorAll('.exact-amount-input');
+
+    let totalEntered = 0;
+    exactInputs.forEach(input => {
+        const value = parseFloat(input.value) || 0;
+        totalEntered += value;
+    });
+
+    const remaining = totalAmount - totalEntered;
+
+    document.getElementById('exact-total').textContent = `${totalEntered.toFixed(2)} ${currency}`;
+
+    const remainingEl = document.getElementById('exact-remaining');
+    remainingEl.textContent = `${remaining.toFixed(2)} ${currency}`;
+
+    // Color code the remaining amount
+    if (Math.abs(remaining) < 0.01) {
+        remainingEl.className = 'font-semibold text-green-600';
+    } else if (remaining < 0) {
+        remainingEl.className = 'font-semibold text-red-600';
+    } else {
+        remainingEl.className = 'font-semibold text-orange-600';
     }
 }
 
@@ -1095,6 +1132,7 @@ function closeAddExpenseModal() {
     document.getElementById('add-expense-form').reset();
     document.getElementById('exact-amounts-container').innerHTML = '';
     document.getElementById('exact-amounts-container').classList.add('hidden');
+    document.getElementById('exact-amounts-summary').classList.add('hidden');
     document.getElementById('conversion-preview').classList.add('hidden');
     document.getElementById('expense-currency').value = 'USD';
 }
