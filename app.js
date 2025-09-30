@@ -4,6 +4,8 @@ let friends = [];
 let allUsers = [];
 let expenses = [];
 let currentTheme = 'emerald';
+let groups = [];
+let currentGroupId = null;
 
 // Currency conversion rates (to USD) - Updated from Federal Reserve H.10 (September 2025)
 const CURRENCY_RATES = {
@@ -99,6 +101,8 @@ function setupFormListeners() {
     document.getElementById('edit-expense-form').addEventListener('submit', handleEditExpense);
     document.getElementById('add-friend-form').addEventListener('submit', handleAddFriend);
     document.getElementById('settle-up-form').addEventListener('submit', handleSettleUp);
+    document.getElementById('create-group-form').addEventListener('submit', handleCreateGroup);
+    document.getElementById('invite-group-form').addEventListener('submit', handleInviteToGroup);
 
     // Listen for split type changes
     document.getElementById('expense-split-type').addEventListener('change', handleSplitTypeChange);
@@ -197,6 +201,7 @@ async function handleAuthSuccess(user) {
     await loadFriends();
     await loadAllUsers();
     await loadExpenses();
+    await loadGroups();
     await updateDashboard();
 }
 
@@ -1488,6 +1493,425 @@ async function restoreSnapshot(snapshotId) {
         console.error('Error restoring snapshot:', err);
         showToast('Error restoring snapshot', 'error');
     }
+}
+
+// ============ GROUPS FUNCTIONS ============
+
+async function loadGroups() {
+    if (!currentUser) return;
+
+    // Load groups where user is a member
+    const { data, error } = await supabase
+        .from('group_members')
+        .select(`
+            group_id,
+            role,
+            groups:group_id (
+                id,
+                name,
+                description,
+                created_by,
+                created_at
+            )
+        `)
+        .eq('user_id', currentUser.id);
+
+    if (error) {
+        console.error('Error loading groups:', error);
+        showToast('Error loading groups: ' + error.message, 'error');
+        return;
+    }
+
+    groups = data ? data.map(item => ({
+        ...item.groups,
+        myRole: item.role
+    })) : [];
+
+    updateGroupsList();
+    await loadGroupInvites();
+}
+
+function updateGroupsList() {
+    const container = document.getElementById('groups-list');
+
+    if (groups.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm">No groups yet. Create one to get started!</p>';
+        return;
+    }
+
+    container.innerHTML = groups.map(group => {
+        const date = new Date(group.created_at).toLocaleDateString();
+        const roleText = group.myRole === 'admin' ? '👑 Admin' : 'Member';
+
+        return `
+            <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md hover:bg-gray-50">
+                <div class="flex-1">
+                    <p class="font-medium text-lg">${group.name}</p>
+                    ${group.description ? `<p class="text-sm text-gray-600 mt-1">${group.description}</p>` : ''}
+                    <p class="text-xs text-gray-500 mt-1">Created ${date} • ${roleText}</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="viewGroupMembers('${group.id}')"
+                        class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
+                        View Members
+                    </button>
+                    <button onclick="openInviteGroupModal('${group.id}')"
+                        class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                        + Invite
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function handleCreateGroup(e) {
+    e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Creating...';
+
+    try {
+        console.log('Starting group creation...');
+        const name = document.getElementById('group-name').value;
+        const description = document.getElementById('group-description').value;
+
+        // Get selected members to invite
+        const selectedMembers = Array.from(document.querySelectorAll('.group-member-checkbox:checked'))
+            .map(cb => cb.value);
+
+        console.log('Creating group:', { name, description, selectedMembers });
+
+        // Create the group
+        console.log('Inserting into groups table...');
+        const { data: group, error: groupError } = await supabase
+            .from('groups')
+            .insert({
+                name,
+                description,
+                created_by: currentUser.id
+            })
+            .select()
+            .single();
+
+        console.log('Group insert result:', { group, groupError });
+
+        if (groupError) {
+            console.error('Group error:', groupError);
+            showToast('Error creating group: ' + groupError.message, 'error');
+            return;
+        }
+
+        // Add creator as admin member
+        console.log('Adding creator as admin member...');
+        const { data: memberData, error: memberError } = await supabase
+            .from('group_members')
+            .insert({
+                group_id: group.id,
+                user_id: currentUser.id,
+                role: 'admin'
+            })
+            .select();
+
+        console.log('Member insert result:', { memberData, memberError });
+
+        if (memberError) {
+            console.error('Member error:', memberError);
+            showToast('Error adding you to the group: ' + memberError.message, 'error');
+            return;
+        }
+
+        // Send invitations to selected members
+        if (selectedMembers.length > 0) {
+            const invites = selectedMembers.map(userId => ({
+                group_id: group.id,
+                inviter_id: currentUser.id,
+                invitee_id: userId,
+                status: 'pending'
+            }));
+
+            const { error: inviteError } = await supabase
+                .from('group_invites')
+                .insert(invites);
+
+            if (inviteError) {
+                console.error('Invite error:', inviteError);
+                showToast(`Group created but error sending invitations: ${inviteError.message}`, 'error');
+            } else {
+                showToast(`✓ Group "${name}" created and ${selectedMembers.length} invitation(s) sent!`, 'success');
+            }
+        } else {
+            showToast(`✓ Group "${name}" created successfully!`, 'success');
+        }
+
+        closeCreateGroupModal();
+        await loadGroups();
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Create Group';
+    }
+}
+
+async function loadGroupInvites() {
+    const container = document.getElementById('group-invites-list');
+    const section = document.getElementById('group-invites-section');
+
+    // Get invites where current user is the invitee
+    const { data, error } = await supabase
+        .from('group_invites')
+        .select(`
+            id,
+            group_id,
+            created_at,
+            groups:group_id (
+                id,
+                name,
+                description
+            ),
+            inviter:inviter_id (
+                id,
+                email,
+                full_name
+            )
+        `)
+        .eq('invitee_id', currentUser.id)
+        .eq('status', 'pending');
+
+    if (error) {
+        console.error('Error loading group invites:', error);
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+
+    section.classList.remove('hidden');
+    container.innerHTML = data.map(invite => {
+        const inviterName = invite.inviter?.full_name || invite.inviter?.email || 'Unknown';
+        const groupName = invite.groups?.name || 'Unknown Group';
+        const date = new Date(invite.created_at).toLocaleDateString();
+
+        return `
+            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
+                <div>
+                    <p class="font-medium">${groupName}</p>
+                    <p class="text-sm text-gray-600">Invited by ${inviterName}</p>
+                    <p class="text-xs text-gray-500 mt-1">${date}</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="acceptGroupInvite('${invite.id}', '${invite.group_id}')"
+                        class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                        Accept
+                    </button>
+                    <button onclick="declineGroupInvite('${invite.id}')"
+                        class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
+                        Decline
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function handleInviteToGroup(e) {
+    e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Sending...';
+
+    try {
+        const email = document.getElementById('invite-user-email').value;
+
+        // Find user by email
+        const { data: profiles, error: searchError } = await supabase
+            .from('profiles')
+            .select('id, email, full_name')
+            .eq('email', email)
+            .single();
+
+        if (searchError || !profiles) {
+            showToast('User not found. Make sure they have a Splitwiser account!', 'error');
+            return;
+        }
+
+        if (profiles.id === currentUser.id) {
+            showToast("You can't invite yourself!", 'error');
+            return;
+        }
+
+        // Check if already a member
+        const { data: existingMember } = await supabase
+            .from('group_members')
+            .select('*')
+            .eq('group_id', currentGroupId)
+            .eq('user_id', profiles.id)
+            .single();
+
+        if (existingMember) {
+            showToast('User is already a member of this group!', 'error');
+            return;
+        }
+
+        // Check if invite already exists
+        const { data: existingInvite } = await supabase
+            .from('group_invites')
+            .select('*')
+            .eq('group_id', currentGroupId)
+            .eq('invitee_id', profiles.id)
+            .eq('status', 'pending')
+            .single();
+
+        if (existingInvite) {
+            showToast('Invitation already sent to this user!', 'error');
+            return;
+        }
+
+        // Create invitation
+        const { error } = await supabase
+            .from('group_invites')
+            .insert({
+                group_id: currentGroupId,
+                inviter_id: currentUser.id,
+                invitee_id: profiles.id,
+                status: 'pending'
+            });
+
+        if (error) {
+            console.error('Invite error:', error);
+            showToast('Error sending invitation', 'error');
+            return;
+        }
+
+        showToast(`✓ Invitation sent to ${profiles.full_name || profiles.email}!`, 'success');
+        closeInviteGroupModal();
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Send Invitation';
+    }
+}
+
+async function acceptGroupInvite(inviteId, groupId) {
+    try {
+        // Delete the invite
+        await supabase
+            .from('group_invites')
+            .delete()
+            .eq('id', inviteId);
+
+        // Add user as member
+        const { error } = await supabase
+            .from('group_members')
+            .insert({
+                group_id: groupId,
+                user_id: currentUser.id,
+                role: 'member'
+            });
+
+        if (error) {
+            console.error('Accept error:', error);
+            showToast('Error accepting invitation', 'error');
+            return;
+        }
+
+        showToast('✓ Joined group successfully!', 'success');
+        await loadGroups();
+    } catch (err) {
+        console.error('Accept error:', err);
+        showToast('Error accepting invitation', 'error');
+    }
+}
+
+async function declineGroupInvite(inviteId) {
+    try {
+        const { error } = await supabase
+            .from('group_invites')
+            .delete()
+            .eq('id', inviteId);
+
+        if (error) {
+            console.error('Decline error:', error);
+            showToast('Error declining invitation', 'error');
+            return;
+        }
+
+        showToast('Group invitation declined', 'success');
+        await loadGroupInvites();
+    } catch (err) {
+        console.error('Decline error:', err);
+        showToast('Error declining invitation', 'error');
+    }
+}
+
+async function viewGroupMembers(groupId) {
+    const { data, error } = await supabase
+        .from('group_members')
+        .select(`
+            role,
+            joined_at,
+            profiles:user_id (
+                id,
+                email,
+                full_name
+            )
+        `)
+        .eq('group_id', groupId);
+
+    if (error) {
+        console.error('Error loading members:', error);
+        showToast('Error loading group members', 'error');
+        return;
+    }
+
+    const memberNames = data.map(m => {
+        const name = m.profiles?.full_name || m.profiles?.email || 'Unknown';
+        const role = m.role === 'admin' ? ' (Admin)' : '';
+        return name + role;
+    }).join('\n');
+
+    alert(`Group Members:\n\n${memberNames}`);
+}
+
+function openCreateGroupModal() {
+    document.getElementById('create-group-modal').classList.remove('hidden');
+
+    // Populate member selection with all users
+    const container = document.getElementById('group-members-to-add');
+    container.innerHTML = '<p class="text-xs text-gray-500 mb-2">Select users to invite to this group</p>';
+
+    if (allUsers.length === 0) {
+        container.innerHTML += '<p class="text-xs text-gray-400">No users available to invite</p>';
+        return;
+    }
+
+    allUsers.forEach(user => {
+        const name = user.full_name || user.email;
+        container.innerHTML += `
+            <label class="flex items-center gap-2 hover:bg-gray-50 p-1 rounded cursor-pointer">
+                <input type="checkbox" value="${user.id}" class="group-member-checkbox">
+                <span class="text-sm">${name}</span>
+            </label>
+        `;
+    });
+}
+
+function closeCreateGroupModal() {
+    document.getElementById('create-group-modal').classList.add('hidden');
+    document.getElementById('create-group-form').reset();
+}
+
+function openInviteGroupModal(groupId) {
+    currentGroupId = groupId;
+    document.getElementById('invite-group-modal').classList.remove('hidden');
+}
+
+function closeInviteGroupModal() {
+    document.getElementById('invite-group-modal').classList.add('hidden');
+    document.getElementById('invite-group-form').reset();
+    currentGroupId = null;
 }
 
 // ============ UTILITY FUNCTIONS ============
