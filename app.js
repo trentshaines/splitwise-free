@@ -102,6 +102,7 @@ function setupFormListeners() {
     document.getElementById('add-friend-form').addEventListener('submit', handleAddFriend);
     document.getElementById('settle-up-form').addEventListener('submit', handleSettleUp);
     document.getElementById('create-group-form').addEventListener('submit', handleCreateGroup);
+    document.getElementById('edit-group-form').addEventListener('submit', handleEditGroup);
     document.getElementById('invite-group-form').addEventListener('submit', handleInviteToGroup);
 
     // Listen for split type changes
@@ -200,8 +201,8 @@ async function handleAuthSuccess(user) {
     // Load data
     await loadFriends();
     await loadAllUsers();
-    await loadExpenses();
     await loadGroups();
+    await loadExpenses();
     await updateDashboard();
 }
 
@@ -261,6 +262,11 @@ function showTab(tabName) {
     const activeBtn = document.querySelector(`[data-tab="${tabName}"]`);
     activeBtn.classList.remove('border-transparent', 'text-gray-600');
     activeBtn.classList.add('border-emerald-600', 'text-emerald-600');
+
+    // If showing expenses tab, refresh the display with group badges
+    if (tabName === 'expenses') {
+        updateExpensesDisplay();
+    }
 }
 
 // ============ FRIENDS FUNCTIONS ============
@@ -326,9 +332,25 @@ function updateFriendsList() {
     `).join('');
 }
 
-function updateExpenseParticipants() {
+async function updateExpenseParticipants() {
     const container = document.getElementById('expense-participants');
     const paidBySelect = document.getElementById('expense-paid-by');
+    const groupId = document.getElementById('expense-group')?.value;
+
+    let availableUsers = allUsers;
+
+    // If a group is selected, filter to only group members
+    if (groupId) {
+        const { data: groupMembers, error } = await supabase
+            .from('group_members')
+            .select('user_id, profiles:user_id(id, email, full_name)')
+            .eq('group_id', groupId);
+
+        if (!error && groupMembers) {
+            const memberIds = new Set(groupMembers.map(m => m.user_id));
+            availableUsers = allUsers.filter(u => memberIds.has(u.id));
+        }
+    }
 
     // Update paid by dropdown
     paidBySelect.innerHTML = '<option value="">Select...</option>';
@@ -337,8 +359,8 @@ function updateExpenseParticipants() {
     const currentUserName = currentUser.user_metadata?.full_name || currentUser.email;
     paidBySelect.innerHTML += `<option value="${currentUser.id}">${currentUserName} (You)</option>`;
 
-    // Add all users
-    allUsers.forEach(user => {
+    // Add available users
+    availableUsers.forEach(user => {
         const name = user.full_name || user.email;
         paidBySelect.innerHTML += `<option value="${user.id}">${name}</option>`;
     });
@@ -346,16 +368,16 @@ function updateExpenseParticipants() {
     // Update participants checkboxes
     container.innerHTML = `
         <label class="flex items-center gap-2">
-            <input type="checkbox" value="${currentUser.id}" checked class="participant-checkbox">
+            <input type="checkbox" value="${currentUser.id}" checked class="participant-checkbox" onchange="updateExactAmounts()">
             <span>${currentUserName} (You)</span>
         </label>
     `;
 
-    allUsers.forEach(user => {
+    availableUsers.forEach(user => {
         const name = user.full_name || user.email;
         container.innerHTML += `
             <label class="flex items-center gap-2">
-                <input type="checkbox" value="${user.id}" checked class="participant-checkbox">
+                <input type="checkbox" value="${user.id}" checked class="participant-checkbox" onchange="updateExactAmounts()">
                 <span>${name}</span>
             </label>
         `;
@@ -571,6 +593,7 @@ async function loadExpenses() {
                 amount,
                 paid_by,
                 split_type,
+                group_id,
                 created_at,
                 payer:paid_by (
                     id,
@@ -626,8 +649,8 @@ async function loadExpenses() {
         }
     }));
 
-    updateExpensesList();
     updateRecentExpenses();
+    updateExpensesDisplay();
 }
 
 function updateRecentExpenses() {
@@ -646,6 +669,12 @@ function updateRecentExpenses() {
             ? expense.participants.map(p => p.full_name || p.email || 'Unknown').join(', ')
             : 'Loading...';
 
+        // Group badge
+        const groupBadge = expense.group_id ?
+            `<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded ml-2">
+                ${groups.find(g => g.id === expense.group_id)?.name || 'Group'}
+            </span>` : '';
+
         // Calculate your share
         const myParticipant = expense.participants?.find(p => p.id === currentUser.id);
         const myShare = myParticipant ? myParticipant.share_amount : 0;
@@ -657,7 +686,7 @@ function updateRecentExpenses() {
         return `
             <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
                 <div>
-                    <p class="font-medium">${expense.description}</p>
+                    <p class="font-medium">${expense.description}${groupBadge}</p>
                     <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
                     <p class="text-xs text-gray-500 mt-1">Split between: ${participantNames}</p>
                 </div>
@@ -710,7 +739,6 @@ function updateExpensesList() {
                     </div>
                     <div class="flex gap-2">
                         <button onclick="openEditExpenseModal('${expense.id}')" class="text-blue-600 hover:text-blue-700 text-sm">Edit</button>
-                        <button onclick="deleteExpense('${expense.id}')" class="text-red-600 hover:text-red-700 text-sm">Delete</button>
                     </div>
                 </div>
             </div>
@@ -802,6 +830,7 @@ async function handleAddExpense(e) {
         const currency = document.getElementById('expense-currency').value;
         const paidBy = document.getElementById('expense-paid-by').value;
         const splitType = document.getElementById('expense-split-type').value;
+        const groupId = document.getElementById('expense-group').value || null;
 
         // Convert to USD
         const amount = convertToUSD(originalAmount, currency);
@@ -852,7 +881,8 @@ async function handleAddExpense(e) {
                         description,
                         amount,
                         paid_by: paidBy,
-                        split_type: splitType
+                        split_type: splitType,
+                        group_id: groupId
                     })
                     .select()
                     .single(),
@@ -957,12 +987,20 @@ function openEditExpenseModal(expenseId) {
     // Store the expense ID for later
     document.getElementById('edit-expense-form').dataset.expenseId = expenseId;
 
+    // Populate group dropdown
+    const groupSelect = document.getElementById('edit-expense-group');
+    groupSelect.innerHTML = '<option value="">No group (personal expense)</option>';
+    groups.forEach(group => {
+        groupSelect.innerHTML += `<option value="${group.id}">${group.name}</option>`;
+    });
+
     // Pre-fill the form (amounts are stored in USD)
     document.getElementById('edit-expense-description').value = expense.description;
     document.getElementById('edit-expense-amount').value = expense.amount;
     document.getElementById('edit-expense-currency').value = 'USD';
     document.getElementById('edit-expense-paid-by').value = expense.paid_by;
     document.getElementById('edit-expense-split-type').value = expense.split_type;
+    document.getElementById('edit-expense-group').value = expense.group_id || '';
 
     // Show/hide exact amounts section based on split type
     const exactSection = document.getElementById('edit-exact-amounts-section');
@@ -1110,6 +1148,7 @@ async function handleEditExpense(e) {
         const currency = document.getElementById('edit-expense-currency').value;
         const paidBy = document.getElementById('edit-expense-paid-by').value;
         const splitType = document.getElementById('edit-expense-split-type').value;
+        const groupId = document.getElementById('edit-expense-group').value || null;
 
         // Convert to USD
         const amount = convertToUSD(originalAmount, currency);
@@ -1157,7 +1196,8 @@ async function handleEditExpense(e) {
                 description,
                 amount,
                 paid_by: paidBy,
-                split_type: splitType
+                split_type: splitType,
+                group_id: groupId
             })
             .eq('id', expenseId);
 
@@ -1347,6 +1387,13 @@ async function displayBalances(balances) {
         html += `<div class="text-sm"><span class="text-gray-600">You are owed in total:</span> <span class="font-semibold text-green-600">$${totalOwed.toFixed(2)}</span></div>`;
     }
 
+    // Calculate net balance
+    const netBalance = totalOwed - totalOwes;
+    const netBalanceColor = netBalance > 0 ? 'text-green-600' : netBalance < 0 ? 'text-red-600' : 'text-gray-600';
+    const netBalanceText = netBalance > 0 ? `+$${netBalance.toFixed(2)}` : netBalance < 0 ? `-$${Math.abs(netBalance).toFixed(2)}` : '$0.00';
+
+    html += `<div class="text-sm mt-2 pt-2 border-t border-gray-300"><span class="text-gray-600">Net unsettled balance:</span> <span class="font-semibold ${netBalanceColor}">${netBalanceText}</span></div>`;
+
     container.innerHTML = html;
 }
 
@@ -1453,13 +1500,21 @@ async function loadSettlementHistory() {
 
 // ============ MODAL FUNCTIONS ============
 
-function openAddExpenseModal() {
+async function openAddExpenseModal() {
     if (allUsers.length === 0) {
         showToast('No other users found. Please wait for others to sign up!', 'error');
         return;
     }
+
+    // Populate group dropdown
+    const groupSelect = document.getElementById('expense-group');
+    groupSelect.innerHTML = '<option value="">No group (personal expense)</option>';
+    groups.forEach(group => {
+        groupSelect.innerHTML += `<option value="${group.id}">${group.name}</option>`;
+    });
+
     document.getElementById('add-expense-modal').classList.remove('hidden');
-    updateExpenseParticipants();
+    await updateExpenseParticipants();
 }
 
 function closeAddExpenseModal() {
@@ -1477,6 +1532,22 @@ function closeEditExpenseModal() {
     document.getElementById('edit-expense-form').reset();
     document.getElementById('edit-conversion-preview').classList.add('hidden');
     document.getElementById('edit-expense-currency').value = 'USD';
+}
+
+async function deleteExpenseFromModal() {
+    const form = document.getElementById('edit-expense-form');
+    const expenseId = form.dataset.expenseId;
+
+    if (!expenseId) {
+        showToast('No expense selected', 'error');
+        return;
+    }
+
+    // Close the modal first
+    closeEditExpenseModal();
+
+    // Then call the delete function
+    await deleteExpense(expenseId);
 }
 
 function openAddFriendModal() {
@@ -1652,49 +1723,8 @@ async function loadGroups() {
         myRole: item.role
     })) : [];
 
-    updateGroupsList();
+    updateExpensesDisplay();
     await loadGroupInvites();
-}
-
-function updateGroupsList() {
-    const container = document.getElementById('groups-list');
-
-    if (groups.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-sm">No groups yet. Create one to get started!</p>';
-        return;
-    }
-
-    container.innerHTML = groups.map(group => {
-        const date = new Date(group.created_at).toLocaleDateString();
-        const roleText = group.myRole === 'admin' ? '👑 Admin' : 'Member';
-        const isAdmin = group.myRole === 'admin';
-
-        return `
-            <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md hover:bg-gray-50">
-                <div class="flex-1">
-                    <p class="font-medium text-lg">${group.name}</p>
-                    ${group.description ? `<p class="text-sm text-gray-600 mt-1">${group.description}</p>` : ''}
-                    <p class="text-xs text-gray-500 mt-1">Created ${date} • ${roleText}</p>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="viewGroupMembers('${group.id}')"
-                        class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
-                        View Members
-                    </button>
-                    ${isAdmin ? `
-                        <button onclick="openInviteGroupModal('${group.id}')"
-                            class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
-                            + Invite
-                        </button>
-                        <button onclick="deleteGroup('${group.id}', '${group.name.replace(/'/g, "\\'")}')"
-                            class="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition">
-                            Delete
-                        </button>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
 }
 
 async function handleCreateGroup(e) {
@@ -2126,6 +2156,87 @@ function closeInviteGroupModal() {
     currentGroupId = null;
 }
 
+function openEditGroupModal(groupId) {
+    const group = groups.find(g => g.id === groupId);
+    if (!group) {
+        showToast('Group not found', 'error');
+        return;
+    }
+
+    // Store the group ID for later
+    document.getElementById('edit-group-form').dataset.groupId = groupId;
+
+    // Pre-fill the form
+    document.getElementById('edit-group-name').value = group.name;
+    document.getElementById('edit-group-description').value = group.description || '';
+
+    document.getElementById('edit-group-modal').classList.remove('hidden');
+}
+
+function closeEditGroupModal() {
+    document.getElementById('edit-group-modal').classList.add('hidden');
+    document.getElementById('edit-group-form').reset();
+}
+
+async function deleteGroupFromModal() {
+    const form = document.getElementById('edit-group-form');
+    const groupId = form.dataset.groupId;
+
+    if (!groupId) {
+        showToast('No group selected', 'error');
+        return;
+    }
+
+    // Get group name for the confirmation prompt
+    const group = groups.find(g => g.id === groupId);
+    if (!group) {
+        showToast('Group not found', 'error');
+        return;
+    }
+
+    // Close the modal first
+    closeEditGroupModal();
+
+    // Then call the delete function
+    await deleteGroup(groupId, group.name);
+}
+
+async function handleEditGroup(e) {
+    e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    const groupId = e.target.dataset.groupId;
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Saving...';
+
+    try {
+        const name = document.getElementById('edit-group-name').value;
+        const description = document.getElementById('edit-group-description').value;
+
+        const { error } = await supabase
+            .from('groups')
+            .update({
+                name,
+                description,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', groupId);
+
+        if (error) {
+            console.error('Error updating group:', error);
+            showToast('Error updating group: ' + error.message, 'error');
+            return;
+        }
+
+        showToast('✓ Group updated successfully!', 'success');
+        closeEditGroupModal();
+        await loadGroups();
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Save Changes';
+    }
+}
+
 async function deleteGroup(groupId, groupName) {
     if (!confirm(`Are you sure you want to delete the group "${groupName}"? This will remove all members and invitations.`)) {
         return;
@@ -2144,6 +2255,134 @@ async function deleteGroup(groupId, groupName) {
 
     showToast(`✓ Group "${groupName}" deleted successfully!`, 'success');
     await loadGroups();
+}
+
+function updateExpensesDisplay() {
+    const container = document.getElementById('expenses-by-group');
+
+    if (expenses.length === 0 && groups.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">No expenses or groups yet. Create a group or add an expense to get started!</p>';
+        return;
+    }
+
+    // Group expenses by group_id
+    const ungroupedExpenses = expenses.filter(e => !e.group_id);
+    const groupedExpenses = {};
+
+    expenses.forEach(expense => {
+        if (expense.group_id) {
+            if (!groupedExpenses[expense.group_id]) {
+                groupedExpenses[expense.group_id] = [];
+            }
+            groupedExpenses[expense.group_id].push(expense);
+        }
+    });
+
+    // Build HTML
+    let html = '';
+
+    // Show ungrouped expenses first
+    if (ungroupedExpenses.length > 0) {
+        html += `
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-gray-700">Personal Expenses</h3>
+                    <span class="text-sm text-gray-500">${ungroupedExpenses.length} expense${ungroupedExpenses.length !== 1 ? 's' : ''}</span>
+                </div>
+                <div class="space-y-3">
+                    ${ungroupedExpenses.map(expense => renderExpenseCard(expense)).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // Show each group with its expenses
+    groups.forEach(group => {
+        const groupExpensesList = groupedExpenses[group.id] || [];
+        const isAdmin = group.myRole === 'admin';
+
+        html += `
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="flex-1">
+                        <h3 class="text-lg font-semibold text-emerald-700">${group.name}</h3>
+                        ${group.description ? `<p class="text-sm text-gray-600">${group.description}</p>` : ''}
+                        <p class="text-xs text-gray-500 mt-1">${group.myRole === 'admin' ? '👑 Admin' : 'Member'} • ${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="viewGroupMembers('${group.id}')"
+                            class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
+                            Members
+                        </button>
+                        <button onclick="openAddExpenseModal(); document.getElementById('expense-group').value='${group.id}'"
+                            class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                            + Expense
+                        </button>
+                        ${isAdmin ? `
+                            <button onclick="openEditGroupModal('${group.id}')"
+                                class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-700 transition">
+                                Edit
+                            </button>
+                            <button onclick="openInviteGroupModal('${group.id}')"
+                                class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 transition">
+                                + Invite
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    ${groupExpensesList.length > 0
+                        ? groupExpensesList.map(expense => renderExpenseCard(expense)).join('')
+                        : '<p class="text-gray-500 text-sm text-center py-4">No expenses in this group yet</p>'
+                    }
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function renderExpenseCard(expense) {
+    const date = new Date(expense.created_at).toLocaleDateString();
+    const payer = allUsers.find(u => u.id === expense.paid_by) || currentUser;
+    const payerName = expense.paid_by === currentUser.id ? 'You' : (payer.full_name || payer.email);
+
+    // Participant names with shares
+    const participantNames = expense.participants
+        ? expense.participants.map(p => {
+            const name = p.id === currentUser.id ? 'You' : (p.full_name || p.email || 'Unknown');
+            return `${name} ($${p.share_amount.toFixed(2)})`;
+          }).join(', ')
+        : 'Loading...';
+
+    // Calculate your balance
+    const myParticipant = expense.participants?.find(p => p.id === currentUser.id);
+    const myShare = myParticipant ? myParticipant.share_amount : 0;
+    const iPaid = expense.paid_by === currentUser.id;
+    const myBalance = iPaid ? (expense.amount - myShare) : -myShare;
+    const myBalanceColor = myBalance > 0 ? 'text-green-600' : myBalance < 0 ? 'text-red-600' : 'text-gray-600';
+    const myBalanceSign = myBalance > 0 ? '+' : myBalance < 0 ? '-' : '';
+
+    return `
+        <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md hover:bg-gray-50">
+            <div class="flex-1">
+                <p class="font-medium">${expense.description}</p>
+                <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
+                <p class="text-xs text-gray-500 mt-1">Split: ${participantNames}</p>
+            </div>
+            <div class="text-right">
+                <div class="flex flex-col items-end mb-2">
+                    <p class="font-semibold text-blue-600">$${expense.amount.toFixed(2)}</p>
+                    <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
+                </div>
+                <div class="flex gap-2 justify-end">
+                    <button onclick="openEditExpenseModal('${expense.id}')"
+                        class="text-xs text-blue-600 hover:text-blue-700">Edit</button>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // ============ UTILITY FUNCTIONS ============

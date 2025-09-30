@@ -301,10 +301,6 @@
                         class="tab-btn py-4 border-b-2 border-transparent text-gray-600 hover:text-gray-900">
                         Friends
                     </button>
-                    <button onclick="showTab('groups')" data-tab="groups"
-                        class="tab-btn py-4 border-b-2 border-transparent text-gray-600 hover:text-gray-900">
-                        Groups
-                    </button>
                 </nav>
             </div>
         </div>
@@ -361,17 +357,32 @@
 
             <!-- Expenses Tab -->
             <div id="tab-expenses" class="tab-content hidden">
-                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-semibold">All Expenses</h2>
+                <!-- Group Invites -->
+                <div id="group-invites-section" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 hidden">
+                    <h2 class="text-xl font-semibold mb-4">Group Invitations</h2>
+                    <div id="group-invites-list" class="space-y-3">
+                        <p class="text-gray-500 text-sm">No pending invitations</p>
+                    </div>
+                </div>
+
+                <!-- Header with actions -->
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-semibold">Expenses & Groups</h2>
+                    <div class="flex gap-2">
+                        <button onclick="openCreateGroupModal()"
+                            class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition text-sm font-medium">
+                            + New Group
+                        </button>
                         <button onclick="openAddExpenseModal()"
                             class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 transition text-sm font-medium">
                             + Add Expense
                         </button>
                     </div>
-                    <div id="all-expenses" class="space-y-3">
-                        <p class="text-gray-500 text-sm">No expenses yet</p>
-                    </div>
+                </div>
+
+                <!-- Expenses grouped by group -->
+                <div id="expenses-by-group" class="space-y-6">
+                    <p class="text-gray-500 text-center py-8">No expenses yet</p>
                 </div>
             </div>
 
@@ -400,31 +411,6 @@
                 </div>
                 <img src="money-background.jpg" alt="Money" class="money-image">
             </div>
-
-            <!-- Groups Tab -->
-            <div id="tab-groups" class="tab-content hidden">
-                <!-- Group Invites -->
-                <div id="group-invites-section" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 hidden">
-                    <h2 class="text-xl font-semibold mb-4">Group Invitations</h2>
-                    <div id="group-invites-list" class="space-y-3">
-                        <p class="text-gray-500 text-sm">No pending invitations</p>
-                    </div>
-                </div>
-
-                <!-- Groups List -->
-                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-semibold">My Groups</h2>
-                        <button onclick="openCreateGroupModal()"
-                            class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 transition text-sm font-medium">
-                            + Create Group
-                        </button>
-                    </div>
-                    <div id="groups-list" class="space-y-3">
-                        <p class="text-gray-500 text-sm">No groups yet</p>
-                    </div>
-                </div>
-            </div>
         </main>
     </div>
 
@@ -445,6 +431,13 @@
                         <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
                         <input type="text" id="expense-description" required
                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Group (optional)</label>
+                        <select id="expense-group" onchange="updateExpenseParticipants()"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                            <option value="">No group (personal expense)</option>
+                        </select>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
@@ -544,6 +537,13 @@
                         <input type="text" id="edit-expense-description" required
                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Group (optional)</label>
+                        <select id="edit-expense-group"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                            <option value="">No group (personal expense)</option>
+                        </select>
+                    </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Amount</label>
@@ -626,6 +626,12 @@
                         </button>
                     </div>
                 </form>
+                <div class="border-t border-gray-200 mt-6 pt-4">
+                    <button type="button" onclick="deleteExpenseFromModal()"
+                        class="w-full bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition">
+                        Delete Expense
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -764,10 +770,11 @@
                 </div>
                 <form id="invite-group-form" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">User Email</label>
-                        <input type="email" id="invite-user-email" required
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                            placeholder="Enter user's email">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Select User</label>
+                        <select id="invite-user-id" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                            <option value="">Select a user...</option>
+                        </select>
                         <p class="text-xs text-gray-500 mt-1">User must have a Splitwiser account</p>
                     </div>
                     <div class="flex gap-3 pt-2">
@@ -781,6 +788,52 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Group Modal -->
+    <div id="edit-group-modal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold">Edit Group</h3>
+                    <button onclick="closeEditGroupModal()" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <form id="edit-group-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Group Name</label>
+                        <input type="text" id="edit-group-name" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            placeholder="e.g., Roommates, Trip to Paris">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+                        <textarea id="edit-group-description" rows="2"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            placeholder="What's this group for?"></textarea>
+                    </div>
+                    <div class="flex gap-3 pt-2">
+                        <button type="button" onclick="closeEditGroupModal()"
+                            class="flex-1 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
+                            Cancel
+                        </button>
+                        <button type="submit"
+                            class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
+                            Save Changes
+                        </button>
+                    </div>
+                </form>
+                <div class="border-t border-gray-200 mt-6 pt-4">
+                    <button type="button" onclick="deleteGroupFromModal()"
+                        class="w-full bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition">
+                        Delete Group
+                    </button>
+                </div>
             </div>
         </div>
     </div>
