@@ -842,37 +842,60 @@ async function handleAddExpense(e) {
             }
         }
 
-        // Insert expense
-        const { data: expense, error: expenseError } = await supabase
-            .from('expenses')
-            .insert({
-                description,
-                amount,
-                paid_by: paidBy,
-                split_type: splitType
-            })
-            .select()
-            .single();
+        // Insert expense with 5 second timeout
+        let expense, expenseError;
+        try {
+            const result = await Promise.race([
+                supabase
+                    .from('expenses')
+                    .insert({
+                        description,
+                        amount,
+                        paid_by: paidBy,
+                        split_type: splitType
+                    })
+                    .select()
+                    .single(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), 5000))
+            ]);
+            expense = result.data;
+            expenseError = result.error;
+        } catch (err) {
+            console.error('Expense creation timed out:', err);
+            showToast('Failed to create expense (request timed out). Please try again.', 'error');
+            return;
+        }
 
         if (expenseError) {
-            showToast('Error creating expense', 'error');
+            showToast('Error creating expense: ' + expenseError.message, 'error');
             console.error(expenseError);
             return;
         }
 
-        // Insert expense participants
+        // Insert expense participants with timeout
         const participants = Object.entries(shares).map(([userId, share]) => ({
             expense_id: expense.id,
             user_id: userId,
             share_amount: share
         }));
 
-        const { error: participantsError } = await supabase
-            .from('expense_participants')
-            .insert(participants);
+        let participantsError;
+        try {
+            const result = await Promise.race([
+                supabase
+                    .from('expense_participants')
+                    .insert(participants),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), 5000))
+            ]);
+            participantsError = result.error;
+        } catch (err) {
+            console.error('Participants insert timed out:', err);
+            showToast('Failed to add participants (request timed out). Please try again.', 'error');
+            return;
+        }
 
         if (participantsError) {
-            showToast('Error adding participants', 'error');
+            showToast('Error adding participants: ' + participantsError.message, 'error');
             console.error(participantsError);
             return;
         }
@@ -941,7 +964,15 @@ function openEditExpenseModal(expenseId) {
     document.getElementById('edit-expense-paid-by').value = expense.paid_by;
     document.getElementById('edit-expense-split-type').value = expense.split_type;
 
-    // Load participants
+    // Show/hide exact amounts section based on split type
+    const exactSection = document.getElementById('edit-exact-amounts-section');
+    if (expense.split_type === 'exact') {
+        exactSection.classList.remove('hidden');
+    } else {
+        exactSection.classList.add('hidden');
+    }
+
+    // Load participants with their share amounts
     loadEditExpenseParticipants(expenseId);
 
     document.getElementById('edit-expense-modal').classList.remove('hidden');
@@ -957,6 +988,12 @@ async function loadEditExpenseParticipants(expenseId) {
         console.error('Error loading expense participants:', error);
         return;
     }
+
+    // Create a map of user_id -> share_amount for easy lookup
+    const participantMap = {};
+    data.forEach(p => {
+        participantMap[p.user_id] = p.share_amount;
+    });
 
     const participantIds = data.map(p => p.user_id);
     const container = document.getElementById('edit-expense-participants');
@@ -974,7 +1011,7 @@ async function loadEditExpenseParticipants(expenseId) {
     // Update participants checkboxes
     container.innerHTML = `
         <label class="flex items-center gap-2">
-            <input type="checkbox" value="${currentUser.id}" ${participantIds.includes(currentUser.id) ? 'checked' : ''} class="edit-participant-checkbox">
+            <input type="checkbox" value="${currentUser.id}" ${participantIds.includes(currentUser.id) ? 'checked' : ''} class="edit-participant-checkbox" onchange="updateEditExactAmounts()">
             <span>${currentUserName} (You)</span>
         </label>
     `;
@@ -983,11 +1020,14 @@ async function loadEditExpenseParticipants(expenseId) {
         const name = user.full_name || user.email;
         container.innerHTML += `
             <label class="flex items-center gap-2">
-                <input type="checkbox" value="${user.id}" ${participantIds.includes(user.id) ? 'checked' : ''} class="edit-participant-checkbox">
+                <input type="checkbox" value="${user.id}" ${participantIds.includes(user.id) ? 'checked' : ''} class="edit-participant-checkbox" onchange="updateEditExactAmounts()">
                 <span>${name}</span>
             </label>
         `;
     });
+
+    // Update exact amounts section with prefilled values
+    updateEditExactAmounts(participantMap);
 }
 
 async function handleEditExpense(e) {
