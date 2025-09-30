@@ -289,12 +289,8 @@
         <div class="bg-white border-b border-gray-200">
             <div class="max-w-6xl mx-auto px-4">
                 <nav class="flex gap-8">
-                    <button onclick="showTab('dashboard')" data-tab="dashboard"
-                        class="tab-btn py-4 border-b-2 border-emerald-600 text-emerald-600 font-medium">
-                        Dashboard
-                    </button>
                     <button onclick="showTab('expenses')" data-tab="expenses"
-                        class="tab-btn py-4 border-b-2 border-transparent text-gray-600 hover:text-gray-900">
+                        class="tab-btn py-4 border-b-2 border-emerald-600 text-emerald-600 font-medium">
                         Expenses
                     </button>
                     <button onclick="showTab('friends')" data-tab="friends"
@@ -308,44 +304,8 @@
         <!-- Main Content -->
         <main class="max-w-6xl mx-auto px-4 py-8">
 
-            <!-- Dashboard Tab -->
-            <div id="tab-dashboard" class="tab-content">
-                <div class="grid md:grid-cols-2 gap-6">
-                    <!-- Quick Actions Card -->
-                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                        <h2 class="text-xl font-semibold mb-4">Quick Actions</h2>
-                        <div class="space-y-3">
-                            <!-- "+ Add Expense" button removed - expenses should only be created within groups -->
-                            <button onclick="openSettleUpModal()"
-                                class="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-medium">
-                                Settle Up
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Recent Expenses & Settlement History -->
-                <div class="mt-6 grid md:grid-cols-2 gap-6">
-                    <!-- Recent Expenses -->
-                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                        <h2 class="text-xl font-semibold mb-4">Recent Expenses</h2>
-                        <div id="recent-expenses" class="space-y-3">
-                            <p class="text-gray-500 text-sm">No expenses yet</p>
-                        </div>
-                    </div>
-
-                    <!-- Settlement History -->
-                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                        <h2 class="text-xl font-semibold mb-4">Settlement History</h2>
-                        <div id="settlement-history" class="space-y-3">
-                            <p class="text-gray-500 text-sm">No settlements yet</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Expenses Tab -->
-            <div id="tab-expenses" class="tab-content hidden">
+            <div id="tab-expenses" class="tab-content">
                 <!-- Group Invites -->
                 <div id="group-invites-section" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 hidden">
                     <h2 class="text-xl font-semibold mb-4">Group Invitations</h2>
@@ -360,11 +320,7 @@
                     <div class="flex gap-2">
                         <button onclick="openCreateGroupModal()"
                             class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition text-sm font-medium">
-                            + New Group
-                        </button>
-                        <button onclick="openAddExpenseModal()"
-                            class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 transition text-sm font-medium">
-                            + Add Expense
+                            New Group
                         </button>
                     </div>
                 </div>
@@ -876,6 +832,12 @@
                         </button>
                     </div>
                 </form>
+                <div id="settlement-delete-section" class="border-t border-gray-200 mt-6 pt-4 hidden">
+                    <button type="button" onclick="deleteSettlementFromModal()"
+                        class="w-full bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition">
+                        Delete Settlement
+                    </button>
+                </div>
             </div>
         </div>
     </div>

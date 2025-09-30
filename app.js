@@ -8,6 +8,7 @@ let groups = [];
 let groupSettlements = []; // Track group settlements
 let currentGroupId = null;
 let collapsedGroups = new Set(); // Track which groups are collapsed
+let editingSettlementId = null; // Track settlement being edited
 
 // Helper function to wrap Supabase calls with timeout
 async function withTimeout(promise, timeoutMs = 10000, errorMessage = 'Request timed out') {
@@ -216,7 +217,6 @@ async function handleAuthSuccess(user) {
     await loadAllUsers();
     await loadGroups();
     await loadExpenses();
-    await updateDashboard();
 }
 
 async function ensureProfile(user) {
@@ -662,7 +662,6 @@ async function loadExpenses() {
         }
     }));
 
-    updateRecentExpenses();
     await loadGroupSettlements();
     updateExpensesDisplay();
 }
@@ -701,51 +700,6 @@ async function loadGroupSettlements() {
     groupSettlements = data || [];
 }
 
-function updateRecentExpenses() {
-    const container = document.getElementById('recent-expenses');
-
-    if (expenses.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-sm">No expenses yet</p>';
-        return;
-    }
-
-    const recentExpenses = expenses.slice(0, 5);
-    container.innerHTML = recentExpenses.map(expense => {
-        const payerName = expense.payer?.full_name || expense.payer?.email || 'Unknown';
-        const date = new Date(expense.created_at).toLocaleDateString();
-        const participantNames = expense.participants
-            ? expense.participants.map(p => p.full_name || p.email || 'Unknown').join(', ')
-            : 'Loading...';
-
-        // Group badge
-        const groupBadge = expense.group_id ?
-            `<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded ml-2">
-                ${groups.find(g => g.id === expense.group_id)?.name || 'Group'}
-            </span>` : '';
-
-        // Calculate your share
-        const myParticipant = expense.participants?.find(p => p.id === currentUser.id);
-        const myShare = myParticipant ? myParticipant.share_amount : 0;
-        const iPaid = expense.paid_by === currentUser.id;
-        const myBalance = iPaid ? (expense.amount - myShare) : -myShare;
-        const myBalanceColor = myBalance > 0 ? 'text-green-600' : myBalance < 0 ? 'text-red-600' : 'text-gray-600';
-        const myBalanceSign = myBalance > 0 ? '+' : myBalance < 0 ? '-' : '';
-
-        return `
-            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
-                <div>
-                    <p class="font-medium">${expense.description}${groupBadge}</p>
-                    <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
-                    <p class="text-xs text-gray-500 mt-1">Split between: ${participantNames}</p>
-                </div>
-                <div class="text-right flex flex-col items-end">
-                    <p class="font-semibold text-blue-600">$${expense.amount.toFixed(2)}</p>
-                    <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
 
 function updateExpensesList() {
     const container = document.getElementById('all-expenses');
@@ -1004,7 +958,6 @@ async function handleAddExpense(e) {
         // await createSnapshot();
         closeAddExpenseModal();
         await loadExpenses();
-        await updateDashboard();
     } finally {
         // Re-enable button
         submitButton.disabled = false;
@@ -1044,7 +997,6 @@ async function deleteExpense(expenseId) {
     showToast('✓ Expense deleted successfully!', 'success');
     // await createSnapshot();
     await loadExpenses();
-    await updateDashboard();
 }
 
 function openEditExpenseModal(expenseId) {
@@ -1326,7 +1278,6 @@ async function handleEditExpense(e) {
         // await createSnapshot();
         closeEditExpenseModal();
         await loadExpenses();
-        await updateDashboard();
     } finally {
         submitButton.disabled = false;
         submitButton.textContent = 'Update Expense';
@@ -1334,11 +1285,6 @@ async function handleEditExpense(e) {
 }
 
 // ============ BALANCES & SETTLEMENTS ============
-
-async function updateDashboard() {
-    // Note: Balance display removed from dashboard, now shown at group level only
-    await loadSettlementHistory();
-}
 
 async function calculateAndDisplayBalances() {
     // Get all expense participants for current user
@@ -1519,75 +1465,11 @@ async function handleSettleUp(e) {
         showToast('✓ Payment recorded successfully!', 'success');
         // await createSnapshot();
         closeSettleUpModal();
-        await updateDashboard();
     } finally {
         // Re-enable button
         submitButton.disabled = false;
         submitButton.textContent = 'Record Payment';
     }
-}
-
-async function loadSettlementHistory() {
-    const container = document.getElementById('settlement-history');
-
-    // Get all settlements involving current user
-    const { data, error } = await supabase
-        .from('settlements')
-        .select(`
-            id,
-            amount,
-            created_at,
-            from_user,
-            to_user,
-            from_profile:from_user (
-                id,
-                email,
-                full_name
-            ),
-            to_profile:to_user (
-                id,
-                email,
-                full_name
-            )
-        `)
-        .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-    if (error) {
-        console.error('Error loading settlements:', error);
-        container.innerHTML = '<p class="text-red-500 text-sm">Error loading settlements</p>';
-        return;
-    }
-
-    if (!data || data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-sm">No settlements yet</p>';
-        return;
-    }
-
-    container.innerHTML = data.map(settlement => {
-        const fromName = settlement.from_profile?.full_name || settlement.from_profile?.email || 'Unknown';
-        const toName = settlement.to_profile?.full_name || settlement.to_profile?.email || 'Unknown';
-        const date = new Date(settlement.created_at).toLocaleDateString();
-        const isCurrentUserPayer = settlement.from_user === currentUser.id;
-
-        return `
-            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
-                <div>
-                    ${isCurrentUserPayer
-                        ? `<p class="text-sm"><span class="font-medium">You</span> paid <span class="font-medium">${toName}</span></p>`
-                        : `<p class="text-sm"><span class="font-medium">${fromName}</span> paid <span class="font-medium">you</span></p>`
-                    }
-                    <p class="text-xs text-gray-500 mt-1">${date}</p>
-                </div>
-                <div class="text-right">
-                    <p class="font-semibold ${isCurrentUserPayer ? 'text-red-600' : 'text-green-600'}">
-                        $${settlement.amount.toFixed(2)}
-                    </p>
-                </div>
-            </div>
-        `;
-    }).join('');
 }
 
 // ============ MODAL FUNCTIONS ============
@@ -1673,9 +1555,19 @@ function closeSettleUpModal() {
 
 async function openGroupSettlementModal(groupId) {
     currentGroupId = groupId;
+    editingSettlementId = null; // Clear editing state for new settlements
     const modal = document.getElementById('group-settlement-modal');
     const memberSelect = document.getElementById('settlement-member');
     const directionSelect = document.getElementById('settlement-direction');
+    const modalTitle = modal.querySelector('h3');
+    const submitButton = modal.querySelector('button[type="submit"]');
+
+    // Reset modal title and button text for new settlements
+    modalTitle.textContent = 'Record Settlement';
+    submitButton.textContent = 'Record Settlement';
+
+    // Hide delete button for new settlements
+    document.getElementById('settlement-delete-section').classList.add('hidden');
 
     // Reset form
     document.getElementById('group-settlement-form').reset();
@@ -1713,6 +1605,82 @@ function closeGroupSettlementModal() {
     document.getElementById('group-settlement-modal').classList.add('hidden');
     document.getElementById('group-settlement-form').reset();
     currentGroupId = null;
+    editingSettlementId = null; // Clear editing state
+
+    // Reset modal title and button text
+    const modal = document.getElementById('group-settlement-modal');
+    const modalTitle = modal.querySelector('h3');
+    const submitButton = modal.querySelector('button[type="submit"]');
+    modalTitle.textContent = 'Record Settlement';
+    submitButton.textContent = 'Record Settlement';
+
+    // Hide delete button
+    document.getElementById('settlement-delete-section').classList.add('hidden');
+}
+
+async function openEditSettlementModal(settlementId) {
+    // Find the settlement in groupSettlements
+    const settlement = groupSettlements.find(s => s.id === settlementId);
+    if (!settlement) {
+        showToast('Settlement not found', 'error');
+        return;
+    }
+
+    // Store the settlement ID and group ID for later
+    editingSettlementId = settlementId;
+    currentGroupId = settlement.group_id;
+
+    const modal = document.getElementById('group-settlement-modal');
+    const memberSelect = document.getElementById('settlement-member');
+    const directionSelect = document.getElementById('settlement-direction');
+    const amountInput = document.getElementById('settlement-amount');
+    const modalTitle = modal.querySelector('h3');
+    const submitButton = modal.querySelector('button[type="submit"]');
+
+    // Update modal title and button text
+    modalTitle.textContent = 'Edit Settlement';
+    submitButton.textContent = 'Update Settlement';
+
+    // Load group members
+    const { data: groupMembers, error } = await supabase
+        .from('group_members')
+        .select('user_id, profiles:user_id(id, email, full_name)')
+        .eq('group_id', settlement.group_id);
+
+    if (error) {
+        console.error('Error loading group members:', error);
+        showToast('Error loading group members', 'error');
+        return;
+    }
+
+    // Populate member dropdown (exclude current user)
+    memberSelect.innerHTML = '<option value="">Select member...</option>';
+    groupMembers.forEach(member => {
+        const profile = member.profiles;
+        if (profile && profile.id !== currentUser.id) {
+            const name = profile.full_name || profile.email;
+            memberSelect.innerHTML += `<option value="${profile.id}">${name}</option>`;
+        }
+    });
+
+    // Determine direction based on who paid
+    const isCurrentUserPayer = settlement.from_user === currentUser.id;
+    directionSelect.value = isCurrentUserPayer ? 'paid' : 'received';
+
+    // Set the other party
+    const otherPartyId = isCurrentUserPayer ? settlement.to_user : settlement.from_user;
+    memberSelect.value = otherPartyId;
+
+    // Set amount
+    amountInput.value = settlement.amount;
+
+    // Update label
+    updateSettlementDirection();
+
+    // Show delete button
+    document.getElementById('settlement-delete-section').classList.remove('hidden');
+
+    modal.classList.remove('hidden');
 }
 
 function updateSettlementDirection() {
@@ -1732,7 +1700,8 @@ async function handleGroupSettlement(e) {
 
     // Disable button and show loading
     submitButton.disabled = true;
-    submitButton.textContent = 'Recording...';
+    const originalButtonText = submitButton.textContent;
+    submitButton.textContent = editingSettlementId ? 'Updating...' : 'Recording...';
 
     try {
         const direction = document.getElementById('settlement-direction').value;
@@ -1749,33 +1718,93 @@ async function handleGroupSettlement(e) {
             toUser = currentUser.id;
         }
 
-        // Record group settlement
-        const { error } = await supabase
-            .from('settlements')
-            .insert({
-                from_user: fromUser,
-                to_user: toUser,
-                amount: amount,
-                group_id: currentGroupId
-            });
+        if (editingSettlementId) {
+            // Update existing settlement
+            console.log('Updating settlement:', editingSettlementId, { fromUser, toUser, amount });
+            const { data, error } = await supabase
+                .from('settlements')
+                .update({
+                    from_user: fromUser,
+                    to_user: toUser,
+                    amount: amount
+                })
+                .eq('id', editingSettlementId)
+                .select();
 
-        if (error) {
-            showToast('Error recording settlement', 'error');
-            console.error(error);
-            return;
+            if (error) {
+                showToast('Error updating settlement: ' + error.message, 'error');
+                console.error('Settlement update error:', error);
+                return;
+            }
+
+            console.log('Settlement updated:', data);
+            showToast('Settlement updated successfully!', 'success');
+        } else {
+            // Create new settlement
+            const { error } = await supabase
+                .from('settlements')
+                .insert({
+                    from_user: fromUser,
+                    to_user: toUser,
+                    amount: amount,
+                    group_id: currentGroupId
+                });
+
+            if (error) {
+                showToast('Error recording settlement', 'error');
+                console.error(error);
+                return;
+            }
+
+            showToast('Settlement recorded successfully!', 'success');
         }
 
-        showToast('Settlement recorded successfully!', 'success');
-        closeGroupSettlementModal();
-
-        // Reload data to refresh balances
+        // Reload data to refresh balances BEFORE closing modal
+        await loadGroupSettlements();
         await loadExpenses();
-        await updateDashboard();
+
+        closeGroupSettlementModal();
     } finally {
         // Re-enable button
         submitButton.disabled = false;
-        submitButton.textContent = 'Record Settlement';
+        submitButton.textContent = originalButtonText;
     }
+}
+
+async function deleteSettlement(settlementId) {
+    if (!confirm('Are you sure you want to delete this settlement? This cannot be undone.')) {
+        return;
+    }
+
+    const { error } = await supabase
+        .from('settlements')
+        .delete()
+        .eq('id', settlementId);
+
+    if (error) {
+        showToast('Error deleting settlement', 'error');
+        console.error(error);
+        return;
+    }
+
+    showToast('Settlement deleted successfully!', 'success');
+
+    // Reload data to refresh balances
+    await loadGroupSettlements();
+    await loadExpenses();
+}
+
+async function deleteSettlementFromModal() {
+    if (!editingSettlementId) {
+        showToast('No settlement selected', 'error');
+        return;
+    }
+
+    // Close the modal first
+    closeGroupSettlementModal();
+
+    // Then call the delete function
+    await deleteSettlement(editingSettlementId);
 }
 
 // ============ HISTORY SNAPSHOT FUNCTIONS ============
@@ -1890,7 +1919,6 @@ async function restoreSnapshot(snapshotId) {
 
         // Reload all data
         await loadExpenses();
-        await updateDashboard();
     } catch (err) {
         console.error('Error restoring snapshot:', err);
         showToast('Error restoring snapshot', 'error');
@@ -2539,10 +2567,10 @@ function renderGroupBalanceSummary(balances) {
     const nonZeroBalances = Object.entries(balances).filter(([_, amount]) => Math.abs(amount) > 0.01);
 
     if (nonZeroBalances.length === 0) {
-        return '<div class="bg-green-50 border border-green-200 rounded-md p-3 mb-4"><p class="text-green-700 text-sm font-medium">All settled up in this group! 🎉</p></div>';
+        return '<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-3 mb-4"><p class="text-green-700 text-sm font-medium">All settled up in this group! 🎉</p></div>';
     }
 
-    let html = '<div class="mb-4 space-y-2">';
+    let html = '<div class="mb-6 bg-gray-50 rounded-lg p-4 space-y-2.5">';
     let totalOwed = 0;
     let totalOwes = 0;
 
@@ -2553,18 +2581,18 @@ function renderGroupBalanceSummary(balances) {
         if (amount > 0) {
             // I owe them
             html += `
-                <div class="flex justify-between items-center p-3 bg-red-50 border border-red-200 rounded-md">
-                    <span class="text-sm">You owe <strong>${name}</strong></span>
-                    <span class="font-semibold text-red-600">$${amount.toFixed(2)}</span>
+                <div class="flex justify-between items-center px-3 py-2 bg-white border-l-4 border-red-500 rounded shadow-sm">
+                    <span class="text-sm text-gray-700">You owe <strong class="text-gray-900">${name}</strong></span>
+                    <span class="font-bold text-lg text-red-600">$${amount.toFixed(2)}</span>
                 </div>
             `;
             totalOwes += amount;
         } else {
             // They owe me
             html += `
-                <div class="flex justify-between items-center p-3 bg-green-50 border border-green-200 rounded-md">
-                    <span class="text-sm"><strong>${name}</strong> owes you</span>
-                    <span class="font-semibold text-green-600">$${Math.abs(amount).toFixed(2)}</span>
+                <div class="flex justify-between items-center px-3 py-2 bg-white border-l-4 border-green-500 rounded shadow-sm">
+                    <span class="text-sm text-gray-700"><strong class="text-gray-900">${name}</strong> owes you</span>
+                    <span class="font-bold text-lg text-green-600">$${Math.abs(amount).toFixed(2)}</span>
                 </div>
             `;
             totalOwed += Math.abs(amount);
@@ -2578,9 +2606,9 @@ function renderGroupBalanceSummary(balances) {
         const netBalanceText = netBalance > 0 ? `+$${netBalance.toFixed(2)}` : netBalance < 0 ? `-$${Math.abs(netBalance).toFixed(2)}` : '$0.00';
 
         html += `
-            <div class="flex justify-between items-center text-sm pt-2 border-t border-gray-300">
-                <span class="text-gray-600">Your net balance:</span>
-                <span class="font-semibold ${netBalanceColor}">${netBalanceText}</span>
+            <div class="flex justify-between items-center px-3 py-3 mt-3 border-t-2 border-gray-300">
+                <span class="text-sm font-semibold text-gray-700">Your net balance:</span>
+                <span class="font-bold text-xl ${netBalanceColor}">${netBalanceText}</span>
             </div>
         `;
     }
@@ -2683,20 +2711,20 @@ function updateExpensesDisplay() {
                     <div class="flex gap-2">
                         <button onclick="openAddExpenseModal('${group.id}')"
                             class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
-                            + Expense
+                            Record an Expense
                         </button>
                         <button onclick="openGroupSettlementModal('${group.id}')"
                             class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 transition">
-                            Record Settlement
+                            Record a Settlement
                         </button>
                         ${isAdmin ? `
                             <button onclick="openEditGroupModal('${group.id}')"
                                 class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-700 transition">
-                                Edit
+                                Edit Group
                             </button>
                             <button onclick="openInviteGroupModal('${group.id}')"
                                 class="bg-purple-600 text-white px-3 py-1.5 rounded text-sm hover:bg-purple-700 transition">
-                                + Invite
+                                Invite to Group
                             </button>
                         ` : ''}
                     </div>
@@ -2789,10 +2817,20 @@ function renderSettlementCard(settlement) {
                 </p>
                 <p class="text-xs text-gray-600 mt-1">${date}</p>
             </div>
-            <div class="text-right">
+            <div class="text-right flex flex-col items-end gap-2">
                 <p class="font-semibold text-lg ${isCurrentUserPayer ? 'text-red-600' : 'text-green-600'}">
                     ${isCurrentUserPayer ? '-' : '+'}$${settlement.amount.toFixed(2)}
                 </p>
+                <div class="flex gap-2">
+                    <button onclick="openEditSettlementModal('${settlement.id}')"
+                        class="text-xs text-blue-600 hover:text-blue-800 underline">
+                        Edit
+                    </button>
+                    <button onclick="deleteSettlement('${settlement.id}')"
+                        class="text-xs text-red-600 hover:text-red-800 underline">
+                        Delete
+                    </button>
+                </div>
             </div>
         </div>
     `;
