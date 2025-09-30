@@ -117,6 +117,10 @@
                         class="tab-btn py-4 border-b-2 border-transparent text-gray-600 hover:text-gray-900">
                         Friends
                     </button>
+                    <button onclick="showTab('history')" data-tab="history"
+                        class="tab-btn py-4 border-b-2 border-transparent text-gray-600 hover:text-gray-900">
+                        History
+                    </button>
                 </nav>
             </div>
         </div>
@@ -188,6 +192,26 @@
                     </div>
                     <div id="friends-list" class="space-y-3">
                         <p class="text-gray-500 text-sm">No friends yet</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="tab-history" class="tab-content hidden">
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold">Snapshot History</h2>
+                        <button onclick="loadAndDisplaySnapshots()"
+                            class="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 transition text-sm font-medium">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-4">
+                        Full database snapshots are automatically captured after every transaction.
+                        You can restore to any previous snapshot if needed.
+                    </p>
+                    <div id="history-snapshots" class="space-y-3">
+                        <p class="text-gray-500 text-sm">Loading snapshots...</p>
                     </div>
                 </div>
             </div>

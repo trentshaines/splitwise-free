@@ -191,6 +191,11 @@ function showTab(tabName) {
     const activeBtn = document.querySelector(`[data-tab="${tabName}"]`);
     activeBtn.classList.remove('border-transparent', 'text-gray-600');
     activeBtn.classList.add('border-emerald-600', 'text-emerald-600');
+
+    // Load snapshots when history tab is shown
+    if (tabName === 'history') {
+        loadAndDisplaySnapshots();
+    }
 }
 
 // ============ FRIENDS FUNCTIONS ============
@@ -623,6 +628,7 @@ async function handleAddExpense(e) {
         }
 
         showToast('✓ Expense added successfully!', 'success');
+        await createSnapshot();
         closeAddExpenseModal();
         await loadExpenses();
         await updateDashboard();
@@ -663,6 +669,7 @@ async function deleteExpense(expenseId) {
     }
 
     showToast('✓ Expense deleted successfully!', 'success');
+    await createSnapshot();
     await loadExpenses();
     await updateDashboard();
 }
@@ -804,6 +811,7 @@ async function handleEditExpense(e) {
         }
 
         showToast('✓ Expense updated successfully!', 'success');
+        await createSnapshot();
         closeEditExpenseModal();
         await loadExpenses();
         await updateDashboard();
@@ -989,6 +997,7 @@ async function handleSettleUp(e) {
         }
 
         showToast('✓ Payment recorded successfully!', 'success');
+        await createSnapshot();
         closeSettleUpModal();
         await updateDashboard();
     } finally {
@@ -1041,6 +1050,167 @@ function openSettleUpModal() {
 function closeSettleUpModal() {
     document.getElementById('settle-up-modal').classList.add('hidden');
     document.getElementById('settle-up-form').reset();
+}
+
+// ============ HISTORY SNAPSHOT FUNCTIONS ============
+
+async function createSnapshot() {
+    if (!currentUser) return;
+
+    try {
+        // Capture complete database state
+        const [expensesData, participantsData, settlementsData, profilesData] = await Promise.all([
+            // Get all expenses
+            supabase.from('expenses').select('*').order('created_at', { ascending: false }),
+            // Get all expense participants
+            supabase.from('expense_participants').select('*'),
+            // Get all settlements
+            supabase.from('settlements').select('*').order('created_at', { ascending: false }),
+            // Get all profiles
+            supabase.from('profiles').select('id, email, full_name')
+        ]);
+
+        const snapshotData = {
+            timestamp: new Date().toISOString(),
+            expenses: expensesData.data || [],
+            expense_participants: participantsData.data || [],
+            settlements: settlementsData.data || [],
+            profiles: profilesData.data || []
+        };
+
+        // Save snapshot
+        const { error } = await supabase
+            .from('history_snapshots')
+            .insert({
+                created_by: currentUser.id,
+                snapshot_data: snapshotData
+            });
+
+        if (error) {
+            console.error('Error creating snapshot:', error);
+        } else {
+            console.log('Snapshot created successfully at', snapshotData.timestamp);
+        }
+    } catch (err) {
+        console.error('Failed to create snapshot:', err);
+    }
+}
+
+async function loadSnapshots() {
+    const { data, error } = await supabase
+        .from('history_snapshots')
+        .select(`
+            id,
+            created_at,
+            created_by,
+            snapshot_data,
+            creator:created_by (
+                full_name,
+                email
+            )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(50); // Show last 50 snapshots
+
+    if (error) {
+        console.error('Error loading snapshots:', error);
+        return [];
+    }
+
+    return data || [];
+}
+
+async function restoreSnapshot(snapshotId) {
+    if (!confirm('⚠️ WARNING: This will replace ALL current data with the snapshot. This cannot be undone! Are you sure?')) {
+        return;
+    }
+
+    try {
+        // Get the snapshot
+        const { data: snapshot, error: fetchError } = await supabase
+            .from('history_snapshots')
+            .select('snapshot_data')
+            .eq('id', snapshotId)
+            .single();
+
+        if (fetchError || !snapshot) {
+            showToast('Error loading snapshot', 'error');
+            return;
+        }
+
+        const data = snapshot.snapshot_data;
+
+        // Delete all current data (in order to avoid FK constraints)
+        await supabase.from('expense_participants').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('settlements').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+        // Restore expenses
+        if (data.expenses && data.expenses.length > 0) {
+            await supabase.from('expenses').insert(data.expenses);
+        }
+
+        // Restore expense participants
+        if (data.expense_participants && data.expense_participants.length > 0) {
+            await supabase.from('expense_participants').insert(data.expense_participants);
+        }
+
+        // Restore settlements
+        if (data.settlements && data.settlements.length > 0) {
+            await supabase.from('settlements').insert(data.settlements);
+        }
+
+        showToast('✓ Snapshot restored successfully!', 'success');
+
+        // Reload all data
+        await loadExpenses();
+        await updateDashboard();
+    } catch (err) {
+        console.error('Error restoring snapshot:', err);
+        showToast('Error restoring snapshot', 'error');
+    }
+}
+
+async function loadAndDisplaySnapshots() {
+    const container = document.getElementById('history-snapshots');
+    container.innerHTML = '<p class="text-gray-500 text-sm">Loading snapshots...</p>';
+
+    const snapshots = await loadSnapshots();
+
+    if (!snapshots || snapshots.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm">No snapshots yet. Snapshots are created automatically after transactions.</p>';
+        return;
+    }
+
+    container.innerHTML = snapshots.map(snapshot => {
+        const createdAt = new Date(snapshot.created_at);
+        const dateStr = createdAt.toLocaleDateString() + ' ' + createdAt.toLocaleTimeString();
+        const creatorName = snapshot.creator?.full_name || snapshot.creator?.email || 'Unknown';
+
+        const data = snapshot.snapshot_data;
+        const expenseCount = data.expenses?.length || 0;
+        const settlementCount = data.settlements?.length || 0;
+        const snapshotTime = data.timestamp ? new Date(data.timestamp).toLocaleString() : dateStr;
+
+        return `
+            <div class="border border-gray-200 rounded-md p-4 hover:bg-gray-50">
+                <div class="flex justify-between items-start">
+                    <div class="flex-1">
+                        <p class="font-medium text-gray-900">📸 ${snapshotTime}</p>
+                        <p class="text-sm text-gray-600 mt-1">Created by: ${creatorName}</p>
+                        <div class="flex gap-4 mt-2 text-xs text-gray-500">
+                            <span>💰 ${expenseCount} expense${expenseCount !== 1 ? 's' : ''}</span>
+                            <span>💸 ${settlementCount} settlement${settlementCount !== 1 ? 's' : ''}</span>
+                        </div>
+                    </div>
+                    <button onclick="restoreSnapshot('${snapshot.id}')"
+                        class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 transition">
+                        Restore
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 // ============ UTILITY FUNCTIONS ============
