@@ -473,6 +473,9 @@ async function loadExpenses() {
 
     expenses = Array.from(expenseMap.values());
 
+    // Sort by most recent first
+    expenses.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
     // Load participants for each expense
     await Promise.all(expenses.map(async (expense) => {
         const { data: participants, error: partError } = await supabase
@@ -692,7 +695,7 @@ async function handleAddExpense(e) {
         }
 
         showToast('✓ Expense added successfully!', 'success');
-        await createSnapshot();
+        // await createSnapshot();
         closeAddExpenseModal();
         await loadExpenses();
         await updateDashboard();
@@ -733,7 +736,7 @@ async function deleteExpense(expenseId) {
     }
 
     showToast('✓ Expense deleted successfully!', 'success');
-    await createSnapshot();
+    // await createSnapshot();
     await loadExpenses();
     await updateDashboard();
 }
@@ -880,7 +883,7 @@ async function handleEditExpense(e) {
         }
 
         showToast('✓ Expense updated successfully!', 'success');
-        await createSnapshot();
+        // await createSnapshot();
         closeEditExpenseModal();
         await loadExpenses();
         await updateDashboard();
@@ -1066,7 +1069,7 @@ async function handleSettleUp(e) {
         }
 
         showToast('✓ Payment recorded successfully!', 'success');
-        await createSnapshot();
+        // await createSnapshot();
         closeSettleUpModal();
         await updateDashboard();
     } finally {
