@@ -1768,6 +1768,31 @@ async function loadGroups() {
         myRole: item.role
     })) : [];
 
+    // Load members for each group
+    await Promise.all(groups.map(async (group) => {
+        const { data: members, error: membersError } = await supabase
+            .from('group_members')
+            .select(`
+                user_id,
+                role,
+                profiles:user_id (
+                    id,
+                    email,
+                    full_name
+                )
+            `)
+            .eq('group_id', group.id);
+
+        if (!membersError && members) {
+            group.members = members.map(m => ({
+                ...m.profiles,
+                role: m.role
+            }));
+        } else {
+            group.members = [];
+        }
+    }));
+
     updateExpensesDisplay();
     await loadGroupInvites();
 }
@@ -2356,6 +2381,15 @@ function updateExpensesDisplay() {
         const isAdmin = group.myRole === 'admin';
         const isCollapsed = collapsedGroups.has(group.id);
 
+        // Format members list
+        const membersList = group.members || [];
+        const membersHtml = membersList.map(m => {
+            const name = m.full_name || m.email || 'Unknown';
+            const isMe = m.id === currentUser.id;
+            const roleIcon = m.role === 'admin' ? '👑 ' : '';
+            return `<span class="text-xs ${isMe ? 'font-medium' : ''}">${roleIcon}${name}${isMe ? ' (You)' : ''}</span>`;
+        }).join(', ');
+
         html += `
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <div class="flex justify-between items-center mb-4">
@@ -2366,14 +2400,11 @@ function updateExpensesDisplay() {
                         <div>
                             <h3 class="text-lg font-semibold text-emerald-700">${group.name}</h3>
                             ${group.description ? `<p class="text-sm text-gray-600">${group.description}</p>` : ''}
-                            <p class="text-xs text-gray-500 mt-1">${group.myRole === 'admin' ? '👑 Admin' : 'Member'} • ${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}</p>
+                            <p class="text-xs text-gray-500 mt-1">${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}</p>
+                            ${membersList.length > 0 ? `<p class="text-xs text-gray-500 mt-1">Members: ${membersHtml}</p>` : ''}
                         </div>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="viewGroupMembers('${group.id}')"
-                            class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
-                            Members
-                        </button>
                         <button onclick="openAddExpenseModal(); document.getElementById('expense-group').value='${group.id}'"
                             class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
                             + Expense
