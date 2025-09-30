@@ -934,6 +934,7 @@ async function handleEditExpense(e) {
 
 async function updateDashboard() {
     await calculateAndDisplayBalances();
+    await loadSettlementHistory();
 }
 
 async function calculateAndDisplayBalances() {
@@ -1114,6 +1115,69 @@ async function handleSettleUp(e) {
         submitButton.disabled = false;
         submitButton.textContent = 'Record Payment';
     }
+}
+
+async function loadSettlementHistory() {
+    const container = document.getElementById('settlement-history');
+
+    // Get all settlements involving current user
+    const { data, error } = await supabase
+        .from('settlements')
+        .select(`
+            id,
+            amount,
+            created_at,
+            from_user,
+            to_user,
+            from_profile:from_user (
+                id,
+                email,
+                full_name
+            ),
+            to_profile:to_user (
+                id,
+                email,
+                full_name
+            )
+        `)
+        .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+    if (error) {
+        console.error('Error loading settlements:', error);
+        container.innerHTML = '<p class="text-red-500 text-sm">Error loading settlements</p>';
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm">No settlements yet</p>';
+        return;
+    }
+
+    container.innerHTML = data.map(settlement => {
+        const fromName = settlement.from_profile?.full_name || settlement.from_profile?.email || 'Unknown';
+        const toName = settlement.to_profile?.full_name || settlement.to_profile?.email || 'Unknown';
+        const date = new Date(settlement.created_at).toLocaleDateString();
+        const isCurrentUserPayer = settlement.from_user === currentUser.id;
+
+        return `
+            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
+                <div>
+                    ${isCurrentUserPayer
+                        ? `<p class="text-sm"><span class="font-medium">You</span> paid <span class="font-medium">${toName}</span></p>`
+                        : `<p class="text-sm"><span class="font-medium">${fromName}</span> paid <span class="font-medium">you</span></p>`
+                    }
+                    <p class="text-xs text-gray-500 mt-1">${date}</p>
+                </div>
+                <div class="text-right">
+                    <p class="font-semibold ${isCurrentUserPayer ? 'text-red-600' : 'text-green-600'}">
+                        $${settlement.amount.toFixed(2)}
+                    </p>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 // ============ MODAL FUNCTIONS ============
