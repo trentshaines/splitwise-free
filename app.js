@@ -844,6 +844,28 @@ async function handleAddExpense(e) {
             return;
         }
 
+        // If expense is in a group, validate all participants are group members
+        if (groupId) {
+            const { data: groupMembers, error: membersError } = await supabase
+                .from('group_members')
+                .select('user_id')
+                .eq('group_id', groupId);
+
+            if (membersError) {
+                showToast('Error validating group members', 'error');
+                console.error(membersError);
+                return;
+            }
+
+            const memberIds = new Set(groupMembers.map(m => m.user_id));
+            const invalidParticipants = selectedParticipants.filter(userId => !memberIds.has(userId));
+
+            if (invalidParticipants.length > 0) {
+                showToast('All participants must be members of the group', 'error');
+                return;
+            }
+        }
+
         let shares = {};
 
         if (splitType === 'equal') {
@@ -1160,6 +1182,28 @@ async function handleEditExpense(e) {
         if (selectedParticipants.length === 0) {
             showToast('Please select at least one participant', 'error');
             return;
+        }
+
+        // If expense is in a group, validate all participants are group members
+        if (groupId) {
+            const { data: groupMembers, error: membersError } = await supabase
+                .from('group_members')
+                .select('user_id')
+                .eq('group_id', groupId);
+
+            if (membersError) {
+                showToast('Error validating group members', 'error');
+                console.error(membersError);
+                return;
+            }
+
+            const memberIds = new Set(groupMembers.map(m => m.user_id));
+            const invalidParticipants = selectedParticipants.filter(userId => !memberIds.has(userId));
+
+            if (invalidParticipants.length > 0) {
+                showToast('All participants must be members of the group', 'error');
+                return;
+            }
         }
 
         let shares = {};
