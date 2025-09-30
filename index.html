@@ -10,6 +10,19 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
+        :root {
+            --primary-50: 240, 253, 244;
+            --primary-100: 220, 252, 231;
+            --primary-200: 187, 247, 208;
+            --primary-300: 134, 239, 172;
+            --primary-400: 74, 222, 128;
+            --primary-500: 34, 197, 94;
+            --primary-600: 22, 163, 74;
+            --primary-700: 21, 128, 61;
+            --primary-800: 22, 101, 52;
+            --primary-900: 20, 83, 45;
+        }
+
         .hidden { display: none; }
         .modal-backdrop {
             background-color: rgba(0, 0, 0, 0.5);
@@ -24,6 +37,169 @@
             height: auto;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Theme color definitions */
+        .theme-emerald {
+            --primary-50: 240, 253, 244;
+            --primary-100: 220, 252, 231;
+            --primary-200: 187, 247, 208;
+            --primary-300: 134, 239, 172;
+            --primary-400: 74, 222, 128;
+            --primary-500: 34, 197, 94;
+            --primary-600: 22, 163, 74;
+            --primary-700: 21, 128, 61;
+            --primary-800: 22, 101, 52;
+            --primary-900: 20, 83, 45;
+        }
+
+        .theme-blue {
+            --primary-50: 239, 246, 255;
+            --primary-100: 219, 234, 254;
+            --primary-200: 191, 219, 254;
+            --primary-300: 147, 197, 253;
+            --primary-400: 96, 165, 250;
+            --primary-500: 59, 130, 246;
+            --primary-600: 37, 99, 235;
+            --primary-700: 29, 78, 216;
+            --primary-800: 30, 64, 175;
+            --primary-900: 30, 58, 138;
+        }
+
+        .theme-purple {
+            --primary-50: 250, 245, 255;
+            --primary-100: 243, 232, 255;
+            --primary-200: 233, 213, 255;
+            --primary-300: 216, 180, 254;
+            --primary-400: 192, 132, 252;
+            --primary-500: 168, 85, 247;
+            --primary-600: 147, 51, 234;
+            --primary-700: 126, 34, 206;
+            --primary-800: 107, 33, 168;
+            --primary-900: 88, 28, 135;
+        }
+
+        .theme-rose {
+            --primary-50: 255, 241, 242;
+            --primary-100: 255, 228, 230;
+            --primary-200: 254, 205, 211;
+            --primary-300: 253, 164, 175;
+            --primary-400: 251, 113, 133;
+            --primary-500: 244, 63, 94;
+            --primary-600: 225, 29, 72;
+            --primary-700: 190, 18, 60;
+            --primary-800: 159, 18, 57;
+            --primary-900: 136, 19, 55;
+        }
+
+        .theme-orange {
+            --primary-50: 255, 247, 237;
+            --primary-100: 255, 237, 213;
+            --primary-200: 254, 215, 170;
+            --primary-300: 253, 186, 116;
+            --primary-400: 251, 146, 60;
+            --primary-500: 249, 115, 22;
+            --primary-600: 234, 88, 12;
+            --primary-700: 194, 65, 12;
+            --primary-800: 154, 52, 18;
+            --primary-900: 124, 45, 18;
+        }
+
+        .theme-dark {
+            --primary-50: 248, 250, 252;
+            --primary-100: 241, 245, 249;
+            --primary-200: 226, 232, 240;
+            --primary-300: 203, 213, 225;
+            --primary-400: 148, 163, 184;
+            --primary-500: 100, 116, 139;
+            --primary-600: 71, 85, 105;
+            --primary-700: 51, 65, 85;
+            --primary-800: 30, 41, 59;
+            --primary-900: 15, 23, 42;
+            background-color: rgb(15, 23, 42) !important;
+            color: rgb(226, 232, 240);
+        }
+
+        .theme-dark .bg-gray-50 {
+            background-color: rgb(30, 41, 59) !important;
+        }
+
+        .theme-dark .bg-white {
+            background-color: rgb(51, 65, 85) !important;
+            color: rgb(226, 232, 240);
+        }
+
+        .theme-dark .text-gray-600 {
+            color: rgb(203, 213, 225) !important;
+        }
+
+        .theme-dark .text-gray-700 {
+            color: rgb(226, 232, 240) !important;
+        }
+
+        .theme-dark .border-gray-200 {
+            border-color: rgb(71, 85, 105) !important;
+        }
+
+        .theme-dark .border-gray-300 {
+            border-color: rgb(100, 116, 139) !important;
+        }
+
+        .theme-dark .text-gray-500 {
+            color: rgb(148, 163, 184) !important;
+        }
+
+        .theme-dark .text-red-600 {
+            color: rgb(248, 113, 113) !important;
+        }
+
+        .theme-dark .text-green-600 {
+            color: rgb(134, 239, 172) !important;
+        }
+
+        .theme-dark .bg-red-50 {
+            background-color: rgba(248, 113, 113, 0.1) !important;
+        }
+
+        .theme-dark .bg-green-50 {
+            background-color: rgba(134, 239, 172, 0.1) !important;
+        }
+
+        /* Universal theme color overrides */
+        .bg-emerald-600, .bg-emerald-700,
+        .hover\:bg-emerald-700:hover,
+        [class*="bg-emerald"] {
+            background-color: rgb(var(--primary-600)) !important;
+        }
+
+        .hover\:bg-emerald-700:hover {
+            background-color: rgb(var(--primary-700)) !important;
+        }
+
+        .text-emerald-600,
+        [class*="text-emerald"] {
+            color: rgb(var(--primary-600)) !important;
+        }
+
+        .border-emerald-600,
+        [class*="border-emerald"] {
+            border-color: rgb(var(--primary-600)) !important;
+        }
+
+        .focus\:ring-emerald-500:focus,
+        [class*="focus:ring-emerald"]:focus {
+            --tw-ring-color: rgb(var(--primary-500)) !important;
+        }
+
+        /* Auth screen branding */
+        h1.logo-font {
+            color: rgb(var(--primary-600)) !important;
+        }
+
+        /* Tab active state */
+        .tab-btn.border-emerald-600 {
+            border-color: rgb(var(--primary-600)) !important;
+            color: rgb(var(--primary-600)) !important;
         }
     </style>
 </head>
@@ -98,7 +274,7 @@
         <!-- Header -->
         <header class="bg-white shadow-sm border-b border-gray-200">
             <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-                <h1 class="text-2xl logo-font text-emerald-600">Splitwiser</h1>
+                <h1 class="text-2xl logo-font app-brand">Splitwiser</h1>
                 <div class="flex items-center gap-4">
                     <span id="user-display" class="text-sm text-gray-600"></span>
                     <button onclick="logout()"
@@ -197,6 +373,15 @@
 
             <!-- Friends Tab -->
             <div id="tab-friends" class="tab-content hidden">
+                <!-- Friend Requests -->
+                <div id="friend-requests-section" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 hidden">
+                    <h2 class="text-xl font-semibold mb-4">Friend Requests</h2>
+                    <div id="friend-requests-list" class="space-y-3">
+                        <p class="text-gray-500 text-sm">No pending requests</p>
+                    </div>
+                </div>
+
+                <!-- Friends List -->
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-xl font-semibold">Friends</h2>
@@ -422,7 +607,7 @@
                         </button>
                         <button type="submit"
                             class="flex-1 bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 transition">
-                            Add Friend
+                            Send Request
                         </button>
                     </div>
                 </form>

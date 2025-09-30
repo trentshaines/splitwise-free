@@ -3,6 +3,7 @@ let currentUser = null;
 let friends = [];
 let allUsers = [];
 let expenses = [];
+let currentTheme = 'emerald';
 
 // Currency conversion rates (to USD) - Updated from Federal Reserve H.10 (September 2025)
 const CURRENCY_RATES = {
@@ -67,6 +68,9 @@ function updateEditConversionPreview() {
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
+    // Load saved theme
+    loadTheme();
+
     // Check if user is already logged in
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
@@ -257,6 +261,7 @@ function showTab(tabName) {
 // ============ FRIENDS FUNCTIONS ============
 
 async function loadFriends() {
+    // Load accepted friends
     const { data, error } = await supabase
         .from('friendships')
         .select(`
@@ -278,6 +283,9 @@ async function loadFriends() {
     friends = data.map(f => f.profiles);
     updateFriendsList();
     updateSettleFriendsList();
+
+    // Load pending friend requests (where current user is the recipient)
+    await loadFriendRequests();
 }
 
 async function loadAllUsers() {
@@ -359,6 +367,122 @@ function updateSettleFriendsList() {
     });
 }
 
+async function loadFriendRequests() {
+    const container = document.getElementById('friend-requests-list');
+    const section = document.getElementById('friend-requests-section');
+
+    // Get requests where current user is the recipient (friend_id)
+    const { data, error } = await supabase
+        .from('friendships')
+        .select(`
+            id,
+            user_id,
+            created_at,
+            requester:user_id (
+                id,
+                email,
+                full_name
+            )
+        `)
+        .eq('friend_id', currentUser.id)
+        .eq('status', 'pending');
+
+    if (error) {
+        console.error('Error loading friend requests:', error);
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+
+    section.classList.remove('hidden');
+    container.innerHTML = data.map(request => {
+        const requesterName = request.requester?.full_name || request.requester?.email || 'Unknown';
+        const date = new Date(request.created_at).toLocaleDateString();
+
+        return `
+            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
+                <div>
+                    <p class="font-medium">${requesterName}</p>
+                    <p class="text-xs text-gray-500 mt-1">${date}</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="acceptFriendRequest('${request.id}', '${request.user_id}')"
+                        class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                        Accept
+                    </button>
+                    <button onclick="declineFriendRequest('${request.id}')"
+                        class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
+                        Decline
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function acceptFriendRequest(requestId, requesterId) {
+    try {
+        // Delete the pending request
+        await supabase
+            .from('friendships')
+            .delete()
+            .eq('id', requestId);
+
+        // Create accepted friendship (both directions)
+        const { error: error1 } = await supabase
+            .from('friendships')
+            .insert({
+                user_id: currentUser.id,
+                friend_id: requesterId,
+                status: 'accepted'
+            });
+
+        const { error: error2 } = await supabase
+            .from('friendships')
+            .insert({
+                user_id: requesterId,
+                friend_id: currentUser.id,
+                status: 'accepted'
+            });
+
+        if (error1 || error2) {
+            console.error('Accept error:', error1 || error2);
+            showToast('Error accepting friend request', 'error');
+            return;
+        }
+
+        showToast('✓ Friend request accepted!', 'success');
+        await loadFriends();
+    } catch (err) {
+        console.error('Accept error:', err);
+        showToast('Error accepting friend request', 'error');
+    }
+}
+
+async function declineFriendRequest(requestId) {
+    try {
+        const { error } = await supabase
+            .from('friendships')
+            .delete()
+            .eq('id', requestId);
+
+        if (error) {
+            console.error('Decline error:', error);
+            showToast('Error declining friend request', 'error');
+            return;
+        }
+
+        showToast('Friend request declined', 'success');
+        await loadFriendRequests();
+    } catch (err) {
+        console.error('Decline error:', err);
+        showToast('Error declining friend request', 'error');
+    }
+}
+
 async function handleAddFriend(e) {
     e.preventDefault();
     const email = document.getElementById('friend-email').value;
@@ -366,7 +490,7 @@ async function handleAddFriend(e) {
 
     // Disable button and show loading
     submitButton.disabled = true;
-    submitButton.textContent = 'Adding...';
+    submitButton.textContent = 'Sending...';
 
     try {
         // Find user by email
@@ -387,7 +511,7 @@ async function handleAddFriend(e) {
             return;
         }
 
-        // Check if already friends
+        // Check if already friends or request exists
         const { data: existing } = await supabase
             .from('friendships')
             .select('*')
@@ -396,41 +520,36 @@ async function handleAddFriend(e) {
             .single();
 
         if (existing) {
-            showToast('Already friends with this user!', 'error');
+            if (existing.status === 'accepted') {
+                showToast('Already friends with this user!', 'error');
+            } else if (existing.status === 'pending') {
+                showToast('Friend request already sent!', 'error');
+            }
             return;
         }
 
-        // Create friendship (both directions)
-        const { error: error1 } = await supabase
+        // Create friend request (only one direction, pending)
+        const { error } = await supabase
             .from('friendships')
             .insert({
                 user_id: currentUser.id,
                 friend_id: profiles.id,
-                status: 'accepted'
+                status: 'pending'
             });
 
-        const { error: error2 } = await supabase
-            .from('friendships')
-            .insert({
-                user_id: profiles.id,
-                friend_id: currentUser.id,
-                status: 'accepted'
-            });
-
-        if (error1 || error2) {
-            console.error('Friendship error 1:', error1);
-            console.error('Friendship error 2:', error2);
-            showToast(`Error adding friend: ${(error1 || error2).message}`, 'error');
+        if (error) {
+            console.error('Friendship error:', error);
+            showToast(`Error sending friend request: ${error.message}`, 'error');
             return;
         }
 
-        showToast(`✓ ${profiles.full_name || profiles.email} added as friend!`, 'success');
+        showToast(`✓ Friend request sent to ${profiles.full_name || profiles.email}!`, 'success');
         closeAddFriendModal();
         await loadFriends();
     } finally {
         // Re-enable button
         submitButton.disabled = false;
-        submitButton.textContent = 'Add Friend';
+        submitButton.textContent = 'Send Request';
     }
 }
 
@@ -521,6 +640,15 @@ function updateRecentExpenses() {
         const participantNames = expense.participants
             ? expense.participants.map(p => p.full_name || p.email || 'Unknown').join(', ')
             : 'Loading...';
+
+        // Calculate your share
+        const myParticipant = expense.participants?.find(p => p.id === currentUser.id);
+        const myShare = myParticipant ? myParticipant.share_amount : 0;
+        const iPaid = expense.paid_by === currentUser.id;
+        const myBalance = iPaid ? (expense.amount - myShare) : -myShare;
+        const myBalanceColor = myBalance > 0 ? 'text-green-600' : myBalance < 0 ? 'text-red-600' : 'text-gray-600';
+        const myBalanceSign = myBalance > 0 ? '+' : myBalance < 0 ? '-' : '';
+
         return `
             <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
                 <div>
@@ -528,8 +656,9 @@ function updateRecentExpenses() {
                     <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
                     <p class="text-xs text-gray-500 mt-1">Split between: ${participantNames}</p>
                 </div>
-                <div class="text-right">
-                    <p class="font-semibold text-emerald-600">$${expense.amount.toFixed(2)}</p>
+                <div class="text-right flex flex-col items-end">
+                    <p class="font-semibold text-blue-600">$${expense.amount.toFixed(2)}</p>
+                    <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
                 </div>
             </div>
         `;
@@ -553,6 +682,15 @@ function updateExpensesList() {
                 return `${name} ($${p.share_amount.toFixed(2)})`;
               }).join(', ')
             : 'Loading...';
+
+        // Calculate your share
+        const myParticipant = expense.participants?.find(p => p.id === currentUser.id);
+        const myShare = myParticipant ? myParticipant.share_amount : 0;
+        const iPaid = expense.paid_by === currentUser.id;
+        const myBalance = iPaid ? (expense.amount - myShare) : -myShare;
+        const myBalanceColor = myBalance > 0 ? 'text-green-600' : myBalance < 0 ? 'text-red-600' : 'text-gray-600';
+        const myBalanceSign = myBalance > 0 ? '+' : myBalance < 0 ? '-' : '';
+
         return `
             <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md hover:bg-gray-50">
                 <div class="flex-1">
@@ -561,7 +699,10 @@ function updateExpensesList() {
                     <p class="text-xs text-gray-500 mt-1">Split (${expense.split_type === 'equal' ? 'equally' : expense.split_type}): ${participantNames}</p>
                 </div>
                 <div class="flex items-center gap-4">
-                    <p class="font-semibold text-lg text-emerald-600">$${expense.amount.toFixed(2)}</p>
+                    <div class="text-right flex flex-col items-end">
+                        <p class="font-semibold text-lg text-blue-600">$${expense.amount.toFixed(2)}</p>
+                        <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
+                    </div>
                     <div class="flex gap-2">
                         <button onclick="openEditExpenseModal('${expense.id}')" class="text-blue-600 hover:text-blue-700 text-sm">Edit</button>
                         <button onclick="deleteExpense('${expense.id}')" class="text-red-600 hover:text-red-700 text-sm">Delete</button>
@@ -1373,4 +1514,36 @@ function showToast(message, type = 'info') {
             container.removeChild(toast);
         }, 300);
     }, 3000);
+}
+
+// ============ THEME FUNCTIONS ============
+
+function loadTheme() {
+    const savedTheme = localStorage.getItem('splitwiser-theme') || 'emerald';
+    currentTheme = savedTheme;
+    applyTheme(savedTheme);
+
+    // Set dropdown value
+    const selector = document.getElementById('theme-selector');
+    if (selector) {
+        selector.value = savedTheme;
+    }
+}
+
+function changeTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('splitwiser-theme', theme);
+    applyTheme(theme);
+    showToast(`Theme changed to ${theme}!`, 'success');
+}
+
+function applyTheme(theme) {
+    // Remove all theme classes
+    document.body.classList.remove('theme-emerald', 'theme-blue', 'theme-purple', 'theme-rose', 'theme-orange', 'theme-dark');
+
+    // Add new theme class
+    document.body.classList.add(`theme-${theme}`);
+
+    // Also set data attribute for additional CSS targeting if needed
+    document.body.setAttribute('data-theme', theme);
 }
