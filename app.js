@@ -1542,6 +1542,7 @@ function updateGroupsList() {
     container.innerHTML = groups.map(group => {
         const date = new Date(group.created_at).toLocaleDateString();
         const roleText = group.myRole === 'admin' ? '👑 Admin' : 'Member';
+        const isAdmin = group.myRole === 'admin';
 
         return `
             <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md hover:bg-gray-50">
@@ -1555,10 +1556,16 @@ function updateGroupsList() {
                         class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
                         View Members
                     </button>
-                    <button onclick="openInviteGroupModal('${group.id}')"
-                        class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
-                        + Invite
-                    </button>
+                    ${isAdmin ? `
+                        <button onclick="openInviteGroupModal('${group.id}')"
+                            class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                            + Invite
+                        </button>
+                        <button onclick="deleteGroup('${group.id}', '${group.name.replace(/'/g, "\\'")}')"
+                            class="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition">
+                            Delete
+                        </button>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -1585,36 +1592,58 @@ async function handleCreateGroup(e) {
 
         // Create the group
         console.log('Inserting into groups table...');
-        const { data: group, error: groupError } = await supabase
+        console.log('Current user ID:', currentUser.id);
+
+        // Create the group first (without .select() to avoid SELECT policy issues)
+        console.log('Step 1: Creating group record...');
+        const groupInsertResult = await supabase
             .from('groups')
             .insert({
                 name,
                 description,
                 created_by: currentUser.id
-            })
-            .select()
-            .single();
+            });
 
-        console.log('Group insert result:', { group, groupError });
+        console.log('Group insert result:', groupInsertResult);
 
-        if (groupError) {
-            console.error('Group error:', groupError);
-            showToast('Error creating group: ' + groupError.message, 'error');
+        if (groupInsertResult.error) {
+            console.error('Group error:', groupInsertResult.error);
+            showToast('Error creating group: ' + groupInsertResult.error.message, 'error');
             return;
         }
 
+        // Query back the group we just created to get its ID
+        console.log('Step 2: Fetching created group...');
+        const { data: createdGroups, error: fetchError } = await supabase
+            .from('groups')
+            .select('*')
+            .eq('name', name)
+            .eq('created_by', currentUser.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        console.log('Fetch result:', { createdGroups, fetchError });
+
+        if (fetchError || !createdGroups || createdGroups.length === 0) {
+            console.error('Could not fetch created group');
+            showToast('Group created but could not retrieve it', 'error');
+            return;
+        }
+
+        const group = createdGroups[0];
+        console.log('Created group:', group);
+
         // Add creator as admin member
-        console.log('Adding creator as admin member...');
-        const { data: memberData, error: memberError } = await supabase
+        console.log('Step 3: Adding creator as admin member...');
+        const { error: memberError } = await supabase
             .from('group_members')
             .insert({
                 group_id: group.id,
                 user_id: currentUser.id,
                 role: 'admin'
-            })
-            .select();
+            });
 
-        console.log('Member insert result:', { memberData, memberError });
+        console.log('Member insert result:', { memberError });
 
         if (memberError) {
             console.error('Member error:', memberError);
@@ -1878,7 +1907,7 @@ async function viewGroupMembers(groupId) {
 function openCreateGroupModal() {
     document.getElementById('create-group-modal').classList.remove('hidden');
 
-    // Populate member selection with all users
+    // Populate member selection with friends first, then others
     const container = document.getElementById('group-members-to-add');
     container.innerHTML = '<p class="text-xs text-gray-500 mb-2">Select users to invite to this group</p>';
 
@@ -1887,15 +1916,38 @@ function openCreateGroupModal() {
         return;
     }
 
-    allUsers.forEach(user => {
-        const name = user.full_name || user.email;
-        container.innerHTML += `
-            <label class="flex items-center gap-2 hover:bg-gray-50 p-1 rounded cursor-pointer">
-                <input type="checkbox" value="${user.id}" class="group-member-checkbox">
-                <span class="text-sm">${name}</span>
-            </label>
-        `;
-    });
+    // Separate friends and non-friends
+    const friendIds = new Set(friends.map(f => f.id));
+    const friendUsers = allUsers.filter(u => friendIds.has(u.id));
+    const nonFriendUsers = allUsers.filter(u => !friendIds.has(u.id));
+
+    // Add friends section
+    if (friendUsers.length > 0) {
+        container.innerHTML += '<p class="text-xs font-semibold text-gray-700 mt-2 mb-1">Friends</p>';
+        friendUsers.forEach(user => {
+            const name = user.full_name || user.email;
+            container.innerHTML += `
+                <label class="flex items-center gap-2 hover:bg-gray-50 p-1 rounded cursor-pointer">
+                    <input type="checkbox" value="${user.id}" class="group-member-checkbox">
+                    <span class="text-sm">${name}</span>
+                </label>
+            `;
+        });
+    }
+
+    // Add other users section
+    if (nonFriendUsers.length > 0) {
+        container.innerHTML += '<p class="text-xs font-semibold text-gray-700 mt-3 mb-1">Other Users</p>';
+        nonFriendUsers.forEach(user => {
+            const name = user.full_name || user.email;
+            container.innerHTML += `
+                <label class="flex items-center gap-2 hover:bg-gray-50 p-1 rounded cursor-pointer">
+                    <input type="checkbox" value="${user.id}" class="group-member-checkbox">
+                    <span class="text-sm text-gray-600">${name}</span>
+                </label>
+            `;
+        });
+    }
 }
 
 function closeCreateGroupModal() {
@@ -1906,12 +1958,67 @@ function closeCreateGroupModal() {
 function openInviteGroupModal(groupId) {
     currentGroupId = groupId;
     document.getElementById('invite-group-modal').classList.remove('hidden');
+
+    // Populate user dropdown with friends first, then others
+    const select = document.getElementById('invite-user-id');
+    select.innerHTML = '<option value="">Select a user...</option>';
+
+    // Separate friends and non-friends
+    const friendIds = new Set(friends.map(f => f.id));
+    const friendUsers = allUsers.filter(u => friendIds.has(u.id));
+    const nonFriendUsers = allUsers.filter(u => !friendIds.has(u.id));
+
+    // Add friends optgroup
+    if (friendUsers.length > 0) {
+        const friendsGroup = document.createElement('optgroup');
+        friendsGroup.label = 'Friends';
+        friendUsers.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.full_name || user.email;
+            friendsGroup.appendChild(option);
+        });
+        select.appendChild(friendsGroup);
+    }
+
+    // Add other users optgroup
+    if (nonFriendUsers.length > 0) {
+        const othersGroup = document.createElement('optgroup');
+        othersGroup.label = 'Other Users';
+        nonFriendUsers.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.full_name || user.email;
+            othersGroup.appendChild(option);
+        });
+        select.appendChild(othersGroup);
+    }
 }
 
 function closeInviteGroupModal() {
     document.getElementById('invite-group-modal').classList.add('hidden');
     document.getElementById('invite-group-form').reset();
     currentGroupId = null;
+}
+
+async function deleteGroup(groupId, groupName) {
+    if (!confirm(`Are you sure you want to delete the group "${groupName}"? This will remove all members and invitations.`)) {
+        return;
+    }
+
+    const { error } = await supabase
+        .from('groups')
+        .delete()
+        .eq('id', groupId);
+
+    if (error) {
+        console.error('Error deleting group:', error);
+        showToast('Error deleting group: ' + error.message, 'error');
+        return;
+    }
+
+    showToast(`✓ Group "${groupName}" deleted successfully!`, 'success');
+    await loadGroups();
 }
 
 // ============ UTILITY FUNCTIONS ============
