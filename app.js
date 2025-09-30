@@ -4,6 +4,67 @@ let friends = [];
 let allUsers = [];
 let expenses = [];
 
+// Currency conversion rates (to USD)
+const CURRENCY_RATES = {
+    'USD': 1.00,
+    'EUR': 1.09,
+    'GBP': 1.27,
+    'JPY': 0.0067,
+    'CAD': 0.72,
+    'AUD': 0.64,
+    'CHF': 1.15,
+    'CNY': 0.14,
+    'INR': 0.012,
+    'MXN': 0.050,
+    'BRL': 0.20,
+    'KRW': 0.00075,
+    'SGD': 0.75,
+    'HKD': 0.13,
+    'NZD': 0.60
+};
+
+function convertToUSD(amount, currency) {
+    return amount * (CURRENCY_RATES[currency] || 1);
+}
+
+function updateConversionPreview() {
+    const amount = parseFloat(document.getElementById('expense-amount').value);
+    const currency = document.getElementById('expense-currency').value;
+    const preview = document.getElementById('conversion-preview');
+
+    if (!amount || amount <= 0) {
+        preview.classList.add('hidden');
+        return;
+    }
+
+    if (currency === 'USD') {
+        preview.classList.add('hidden');
+    } else {
+        const usdAmount = convertToUSD(amount, currency);
+        preview.classList.remove('hidden');
+        preview.innerHTML = `💱 = $${usdAmount.toFixed(2)} USD (rate: 1 ${currency} = $${CURRENCY_RATES[currency].toFixed(4)} USD)`;
+    }
+}
+
+function updateEditConversionPreview() {
+    const amount = parseFloat(document.getElementById('edit-expense-amount').value);
+    const currency = document.getElementById('edit-expense-currency').value;
+    const preview = document.getElementById('edit-conversion-preview');
+
+    if (!amount || amount <= 0) {
+        preview.classList.add('hidden');
+        return;
+    }
+
+    if (currency === 'USD') {
+        preview.classList.add('hidden');
+    } else {
+        const usdAmount = convertToUSD(amount, currency);
+        preview.classList.remove('hidden');
+        preview.innerHTML = `💱 = $${usdAmount.toFixed(2)} USD (rate: 1 ${currency} = $${CURRENCY_RATES[currency].toFixed(4)} USD)`;
+    }
+}
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     // Check if user is already logged in
@@ -191,11 +252,6 @@ function showTab(tabName) {
     const activeBtn = document.querySelector(`[data-tab="${tabName}"]`);
     activeBtn.classList.remove('border-transparent', 'text-gray-600');
     activeBtn.classList.add('border-emerald-600', 'text-emerald-600');
-
-    // Load snapshots when history tab is shown
-    if (tabName === 'history') {
-        loadAndDisplaySnapshots();
-    }
 }
 
 // ============ FRIENDS FUNCTIONS ============
@@ -556,9 +612,13 @@ async function handleAddExpense(e) {
 
     try {
         const description = document.getElementById('expense-description').value;
-        const amount = parseFloat(document.getElementById('expense-amount').value);
+        const originalAmount = parseFloat(document.getElementById('expense-amount').value);
+        const currency = document.getElementById('expense-currency').value;
         const paidBy = document.getElementById('expense-paid-by').value;
         const splitType = document.getElementById('expense-split-type').value;
+
+        // Convert to USD
+        const amount = convertToUSD(originalAmount, currency);
 
         const selectedParticipants = Array.from(document.querySelectorAll('.participant-checkbox:checked'))
             .map(cb => cb.value);
@@ -586,9 +646,13 @@ async function handleAddExpense(e) {
                 total += share;
             });
 
-            if (Math.abs(total - amount) > 0.01) {
-                showToast(`Amounts must add up to $${amount.toFixed(2)}. Current total: $${total.toFixed(2)}`, 'error');
+            if (Math.abs(total - originalAmount) > 0.01) {
+                showToast(`Amounts must add up to ${originalAmount.toFixed(2)} ${currency}. Current total: ${total.toFixed(2)} ${currency}`, 'error');
                 return;
+            }
+            // Convert exact shares to USD
+            for (let userId in shares) {
+                shares[userId] = convertToUSD(shares[userId], currency);
             }
         }
 
@@ -684,9 +748,10 @@ function openEditExpenseModal(expenseId) {
     // Store the expense ID for later
     document.getElementById('edit-expense-form').dataset.expenseId = expenseId;
 
-    // Pre-fill the form
+    // Pre-fill the form (amounts are stored in USD)
     document.getElementById('edit-expense-description').value = expense.description;
     document.getElementById('edit-expense-amount').value = expense.amount;
+    document.getElementById('edit-expense-currency').value = 'USD';
     document.getElementById('edit-expense-paid-by').value = expense.paid_by;
     document.getElementById('edit-expense-split-type').value = expense.split_type;
 
@@ -749,9 +814,13 @@ async function handleEditExpense(e) {
 
     try {
         const description = document.getElementById('edit-expense-description').value;
-        const amount = parseFloat(document.getElementById('edit-expense-amount').value);
+        const originalAmount = parseFloat(document.getElementById('edit-expense-amount').value);
+        const currency = document.getElementById('edit-expense-currency').value;
         const paidBy = document.getElementById('edit-expense-paid-by').value;
         const splitType = document.getElementById('edit-expense-split-type').value;
+
+        // Convert to USD
+        const amount = convertToUSD(originalAmount, currency);
 
         const selectedParticipants = Array.from(document.querySelectorAll('.edit-participant-checkbox:checked'))
             .map(cb => cb.value);
@@ -825,6 +894,40 @@ async function handleEditExpense(e) {
 
 async function updateDashboard() {
     await calculateAndDisplayBalances();
+    displayCurrencyRates();
+}
+
+function displayCurrencyRates() {
+    const container = document.getElementById('currency-rates-list');
+    if (!container) return;
+
+    const currencySymbols = {
+        'USD': '$',
+        'EUR': '€',
+        'GBP': '£',
+        'JPY': '¥',
+        'CAD': 'C$',
+        'AUD': 'A$',
+        'CHF': 'Fr',
+        'CNY': '¥',
+        'INR': '₹',
+        'MXN': 'MX$',
+        'BRL': 'R$',
+        'KRW': '₩',
+        'SGD': 'S$',
+        'HKD': 'HK$',
+        'NZD': 'NZ$'
+    };
+
+    container.innerHTML = Object.entries(CURRENCY_RATES)
+        .map(([code, rate]) => {
+            const symbol = currencySymbols[code] || code;
+            if (code === 'USD') {
+                return `<div class="flex justify-between py-1 border-b border-gray-200"><span class="font-medium">${code} ${symbol}</span><span>= $1.00</span></div>`;
+            }
+            return `<div class="flex justify-between py-1 border-b border-gray-200"><span>${code} ${symbol}</span><span>= $${rate.toFixed(4)}</span></div>`;
+        })
+        .join('');
 }
 
 async function calculateAndDisplayBalances() {
@@ -1023,11 +1126,15 @@ function closeAddExpenseModal() {
     document.getElementById('add-expense-form').reset();
     document.getElementById('exact-amounts-container').innerHTML = '';
     document.getElementById('exact-amounts-container').classList.add('hidden');
+    document.getElementById('conversion-preview').classList.add('hidden');
+    document.getElementById('expense-currency').value = 'USD';
 }
 
 function closeEditExpenseModal() {
     document.getElementById('edit-expense-modal').classList.add('hidden');
     document.getElementById('edit-expense-form').reset();
+    document.getElementById('edit-conversion-preview').classList.add('hidden');
+    document.getElementById('edit-expense-currency').value = 'USD';
 }
 
 function openAddFriendModal() {
@@ -1169,48 +1276,6 @@ async function restoreSnapshot(snapshotId) {
         console.error('Error restoring snapshot:', err);
         showToast('Error restoring snapshot', 'error');
     }
-}
-
-async function loadAndDisplaySnapshots() {
-    const container = document.getElementById('history-snapshots');
-    container.innerHTML = '<p class="text-gray-500 text-sm">Loading snapshots...</p>';
-
-    const snapshots = await loadSnapshots();
-
-    if (!snapshots || snapshots.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 text-sm">No snapshots yet. Snapshots are created automatically after transactions.</p>';
-        return;
-    }
-
-    container.innerHTML = snapshots.map(snapshot => {
-        const createdAt = new Date(snapshot.created_at);
-        const dateStr = createdAt.toLocaleDateString() + ' ' + createdAt.toLocaleTimeString();
-        const creatorName = snapshot.creator?.full_name || snapshot.creator?.email || 'Unknown';
-
-        const data = snapshot.snapshot_data;
-        const expenseCount = data.expenses?.length || 0;
-        const settlementCount = data.settlements?.length || 0;
-        const snapshotTime = data.timestamp ? new Date(data.timestamp).toLocaleString() : dateStr;
-
-        return `
-            <div class="border border-gray-200 rounded-md p-4 hover:bg-gray-50">
-                <div class="flex justify-between items-start">
-                    <div class="flex-1">
-                        <p class="font-medium text-gray-900">📸 ${snapshotTime}</p>
-                        <p class="text-sm text-gray-600 mt-1">Created by: ${creatorName}</p>
-                        <div class="flex gap-4 mt-2 text-xs text-gray-500">
-                            <span>💰 ${expenseCount} expense${expenseCount !== 1 ? 's' : ''}</span>
-                            <span>💸 ${settlementCount} settlement${settlementCount !== 1 ? 's' : ''}</span>
-                        </div>
-                    </div>
-                    <button onclick="restoreSnapshot('${snapshot.id}')"
-                        class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 transition">
-                        Restore
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
 }
 
 // ============ UTILITY FUNCTIONS ============
