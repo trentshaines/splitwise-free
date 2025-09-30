@@ -1,6 +1,7 @@
 // Global state
 let currentUser = null;
 let friends = [];
+let allUsers = [];
 let expenses = [];
 
 // Initialize app
@@ -128,6 +129,7 @@ async function handleAuthSuccess(user) {
 
     // Load data
     await loadFriends();
+    await loadAllUsers();
     await loadExpenses();
     await updateDashboard();
 }
@@ -213,8 +215,22 @@ async function loadFriends() {
 
     friends = data.map(f => f.profiles);
     updateFriendsList();
-    updateExpenseParticipants();
     updateSettleFriendsList();
+}
+
+async function loadAllUsers() {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, full_name')
+        .neq('id', currentUser.id);
+
+    if (error) {
+        console.error('Error loading users:', error);
+        return;
+    }
+
+    allUsers = data || [];
+    updateExpenseParticipants();
 }
 
 function updateFriendsList() {
@@ -246,10 +262,10 @@ function updateExpenseParticipants() {
     const currentUserName = currentUser.user_metadata?.full_name || currentUser.email;
     paidBySelect.innerHTML += `<option value="${currentUser.id}">${currentUserName} (You)</option>`;
 
-    // Add friends
-    friends.forEach(friend => {
-        const name = friend.full_name || friend.email;
-        paidBySelect.innerHTML += `<option value="${friend.id}">${name}</option>`;
+    // Add all users
+    allUsers.forEach(user => {
+        const name = user.full_name || user.email;
+        paidBySelect.innerHTML += `<option value="${user.id}">${name}</option>`;
     });
 
     // Update participants checkboxes
@@ -260,11 +276,11 @@ function updateExpenseParticipants() {
         </label>
     `;
 
-    friends.forEach(friend => {
-        const name = friend.full_name || friend.email;
+    allUsers.forEach(user => {
+        const name = user.full_name || user.email;
         container.innerHTML += `
             <label class="flex items-center gap-2">
-                <input type="checkbox" value="${friend.id}" checked class="participant-checkbox">
+                <input type="checkbox" value="${user.id}" checked class="participant-checkbox">
                 <span>${name}</span>
             </label>
         `;
@@ -766,8 +782,8 @@ async function handleSettleUp(e) {
 // ============ MODAL FUNCTIONS ============
 
 function openAddExpenseModal() {
-    if (friends.length === 0) {
-        showToast('Please add friends first before creating expenses', 'error');
+    if (allUsers.length === 0) {
+        showToast('No other users found. Please wait for others to sign up!', 'error');
         return;
     }
     document.getElementById('add-expense-modal').classList.remove('hidden');
