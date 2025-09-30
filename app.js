@@ -72,14 +72,31 @@ async function handleSignup(e) {
         options: {
             data: {
                 full_name: name
-            }
+            },
+            emailRedirectTo: 'https://trentshaines.github.io/splitwise-free/'
         }
     });
 
     if (error) {
         showAuthError(error.message);
     } else {
-        showToast('Account created! Please check your email to confirm.', 'success');
+        // Clear form
+        document.getElementById('signup-form').reset();
+
+        // Switch to login form
+        toggleAuthForm();
+
+        // Show prominent success message
+        const authError = document.getElementById('auth-error');
+        authError.className = 'mt-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-md text-sm';
+        authError.innerHTML = `
+            <strong>✓ Account created!</strong><br>
+            Please check your email (including spam folder) and click the confirmation link.<br>
+            After confirming, come back here to login.
+        `;
+        authError.classList.remove('hidden');
+
+        showToast('Check your email for confirmation link!', 'success');
     }
 }
 
@@ -124,13 +141,24 @@ async function ensureProfile(user) {
 
     if (error && error.code === 'PGRST116') {
         // Profile doesn't exist, create it
-        await supabase
+        console.log('Creating profile for user:', user.email);
+        const { error: insertError } = await supabase
             .from('profiles')
             .insert({
                 id: user.id,
                 email: user.email,
                 full_name: user.user_metadata?.full_name || ''
             });
+
+        if (insertError) {
+            console.error('Error creating profile:', insertError);
+        } else {
+            console.log('Profile created successfully');
+        }
+    } else if (error) {
+        console.error('Error checking profile:', error);
+    } else {
+        console.log('Profile already exists for:', user.email);
     }
 }
 
@@ -256,63 +284,76 @@ function updateSettleFriendsList() {
 async function handleAddFriend(e) {
     e.preventDefault();
     const email = document.getElementById('friend-email').value;
+    const submitButton = e.target.querySelector('button[type="submit"]');
 
-    // Find user by email
-    const { data: profiles, error: searchError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name')
-        .eq('email', email)
-        .single();
+    // Disable button and show loading
+    submitButton.disabled = true;
+    submitButton.textContent = 'Adding...';
 
-    if (searchError || !profiles) {
-        showToast('User not found. Make sure they have an account!', 'error');
-        return;
+    try {
+        // Find user by email
+        const { data: profiles, error: searchError } = await supabase
+            .from('profiles')
+            .select('id, email, full_name')
+            .eq('email', email)
+            .single();
+
+        if (searchError || !profiles) {
+            console.error('Search error:', searchError);
+            showToast('User not found. Make sure they have signed up and confirmed their email!', 'error');
+            return;
+        }
+
+        if (profiles.id === currentUser.id) {
+            showToast("You can't add yourself as a friend!", 'error');
+            return;
+        }
+
+        // Check if already friends
+        const { data: existing } = await supabase
+            .from('friendships')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .eq('friend_id', profiles.id)
+            .single();
+
+        if (existing) {
+            showToast('Already friends with this user!', 'error');
+            return;
+        }
+
+        // Create friendship (both directions)
+        const { error: error1 } = await supabase
+            .from('friendships')
+            .insert({
+                user_id: currentUser.id,
+                friend_id: profiles.id,
+                status: 'accepted'
+            });
+
+        const { error: error2 } = await supabase
+            .from('friendships')
+            .insert({
+                user_id: profiles.id,
+                friend_id: currentUser.id,
+                status: 'accepted'
+            });
+
+        if (error1 || error2) {
+            console.error('Friendship error 1:', error1);
+            console.error('Friendship error 2:', error2);
+            showToast(`Error adding friend: ${(error1 || error2).message}`, 'error');
+            return;
+        }
+
+        showToast(`✓ ${profiles.full_name || profiles.email} added as friend!`, 'success');
+        closeAddFriendModal();
+        await loadFriends();
+    } finally {
+        // Re-enable button
+        submitButton.disabled = false;
+        submitButton.textContent = 'Add Friend';
     }
-
-    if (profiles.id === currentUser.id) {
-        showToast("You can't add yourself as a friend!", 'error');
-        return;
-    }
-
-    // Check if already friends
-    const { data: existing } = await supabase
-        .from('friendships')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .eq('friend_id', profiles.id)
-        .single();
-
-    if (existing) {
-        showToast('Already friends with this user!', 'error');
-        return;
-    }
-
-    // Create friendship (both directions)
-    const { error: error1 } = await supabase
-        .from('friendships')
-        .insert({
-            user_id: currentUser.id,
-            friend_id: profiles.id,
-            status: 'accepted'
-        });
-
-    const { error: error2 } = await supabase
-        .from('friendships')
-        .insert({
-            user_id: profiles.id,
-            friend_id: currentUser.id,
-            status: 'accepted'
-        });
-
-    if (error1 || error2) {
-        showToast('Error adding friend', 'error');
-        console.error(error1 || error2);
-        return;
-    }
-
-    showToast('Friend added successfully!', 'success');
-    closeAddFriendModal();
-    await loadFriends();
 }
 
 // ============ EXPENSES FUNCTIONS ============
@@ -447,83 +488,94 @@ function handleSplitTypeChange(e) {
 
 async function handleAddExpense(e) {
     e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
 
-    const description = document.getElementById('expense-description').value;
-    const amount = parseFloat(document.getElementById('expense-amount').value);
-    const paidBy = document.getElementById('expense-paid-by').value;
-    const splitType = document.getElementById('expense-split-type').value;
+    // Disable button and show loading
+    submitButton.disabled = true;
+    submitButton.textContent = 'Adding...';
 
-    const selectedParticipants = Array.from(document.querySelectorAll('.participant-checkbox:checked'))
-        .map(cb => cb.value);
+    try {
+        const description = document.getElementById('expense-description').value;
+        const amount = parseFloat(document.getElementById('expense-amount').value);
+        const paidBy = document.getElementById('expense-paid-by').value;
+        const splitType = document.getElementById('expense-split-type').value;
 
-    if (selectedParticipants.length === 0) {
-        showToast('Please select at least one participant', 'error');
-        return;
-    }
+        const selectedParticipants = Array.from(document.querySelectorAll('.participant-checkbox:checked'))
+            .map(cb => cb.value);
 
-    let shares = {};
-
-    if (splitType === 'equal') {
-        const shareAmount = amount / selectedParticipants.length;
-        selectedParticipants.forEach(userId => {
-            shares[userId] = shareAmount;
-        });
-    } else {
-        // Exact amounts
-        const exactInputs = document.querySelectorAll('.exact-amount-input');
-        let total = 0;
-        exactInputs.forEach(input => {
-            const userId = input.dataset.userId;
-            const share = parseFloat(input.value) || 0;
-            shares[userId] = share;
-            total += share;
-        });
-
-        if (Math.abs(total - amount) > 0.01) {
-            showToast(`Amounts must add up to $${amount.toFixed(2)}. Current total: $${total.toFixed(2)}`, 'error');
+        if (selectedParticipants.length === 0) {
+            showToast('Please select at least one participant', 'error');
             return;
         }
+
+        let shares = {};
+
+        if (splitType === 'equal') {
+            const shareAmount = amount / selectedParticipants.length;
+            selectedParticipants.forEach(userId => {
+                shares[userId] = shareAmount;
+            });
+        } else {
+            // Exact amounts
+            const exactInputs = document.querySelectorAll('.exact-amount-input');
+            let total = 0;
+            exactInputs.forEach(input => {
+                const userId = input.dataset.userId;
+                const share = parseFloat(input.value) || 0;
+                shares[userId] = share;
+                total += share;
+            });
+
+            if (Math.abs(total - amount) > 0.01) {
+                showToast(`Amounts must add up to $${amount.toFixed(2)}. Current total: $${total.toFixed(2)}`, 'error');
+                return;
+            }
+        }
+
+        // Insert expense
+        const { data: expense, error: expenseError } = await supabase
+            .from('expenses')
+            .insert({
+                description,
+                amount,
+                paid_by: paidBy,
+                split_type: splitType
+            })
+            .select()
+            .single();
+
+        if (expenseError) {
+            showToast('Error creating expense', 'error');
+            console.error(expenseError);
+            return;
+        }
+
+        // Insert expense participants
+        const participants = Object.entries(shares).map(([userId, share]) => ({
+            expense_id: expense.id,
+            user_id: userId,
+            share_amount: share
+        }));
+
+        const { error: participantsError } = await supabase
+            .from('expense_participants')
+            .insert(participants);
+
+        if (participantsError) {
+            showToast('Error adding participants', 'error');
+            console.error(participantsError);
+            return;
+        }
+
+        showToast('✓ Expense added successfully!', 'success');
+        closeAddExpenseModal();
+        await loadExpenses();
+        await updateDashboard();
+    } finally {
+        // Re-enable button
+        submitButton.disabled = false;
+        submitButton.textContent = 'Add Expense';
     }
-
-    // Insert expense
-    const { data: expense, error: expenseError } = await supabase
-        .from('expenses')
-        .insert({
-            description,
-            amount,
-            paid_by: paidBy,
-            split_type: splitType
-        })
-        .select()
-        .single();
-
-    if (expenseError) {
-        showToast('Error creating expense', 'error');
-        console.error(expenseError);
-        return;
-    }
-
-    // Insert expense participants
-    const participants = Object.entries(shares).map(([userId, share]) => ({
-        expense_id: expense.id,
-        user_id: userId,
-        share_amount: share
-    }));
-
-    const { error: participantsError } = await supabase
-        .from('expense_participants')
-        .insert(participants);
-
-    if (participantsError) {
-        showToast('Error adding participants', 'error');
-        console.error(participantsError);
-        return;
-    }
-
-    showToast('Expense added successfully!', 'success');
-    closeAddExpenseModal();
-    await loadExpenses();
-    await updateDashboard();
 }
 
 // ============ BALANCES & SETTLEMENTS ============
@@ -676,28 +728,39 @@ async function displayBalances(balances) {
 
 async function handleSettleUp(e) {
     e.preventDefault();
+    const submitButton = e.target.querySelector('button[type="submit"]');
 
-    const friendId = document.getElementById('settle-friend').value;
-    const amount = parseFloat(document.getElementById('settle-amount').value);
+    // Disable button and show loading
+    submitButton.disabled = true;
+    submitButton.textContent = 'Recording...';
 
-    // Record settlement
-    const { error } = await supabase
-        .from('settlements')
-        .insert({
-            from_user: currentUser.id,
-            to_user: friendId,
-            amount: amount
-        });
+    try {
+        const friendId = document.getElementById('settle-friend').value;
+        const amount = parseFloat(document.getElementById('settle-amount').value);
 
-    if (error) {
-        showToast('Error recording settlement', 'error');
-        console.error(error);
-        return;
+        // Record settlement
+        const { error } = await supabase
+            .from('settlements')
+            .insert({
+                from_user: currentUser.id,
+                to_user: friendId,
+                amount: amount
+            });
+
+        if (error) {
+            showToast('Error recording settlement', 'error');
+            console.error(error);
+            return;
+        }
+
+        showToast('✓ Payment recorded successfully!', 'success');
+        closeSettleUpModal();
+        await updateDashboard();
+    } finally {
+        // Re-enable button
+        submitButton.disabled = false;
+        submitButton.textContent = 'Record Payment';
     }
-
-    showToast('Payment recorded successfully!', 'success');
-    closeSettleUpModal();
-    await updateDashboard();
 }
 
 // ============ MODAL FUNCTIONS ============

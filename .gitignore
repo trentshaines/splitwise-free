@@ -4,6 +4,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Supabase
+supabase/.temp/
+create_test_users.sql
+seed_expenses.sql
+*_seed.sql
+
 # OS
 .DS_Store
 Thumbs.db
@@ -17,3 +23,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Environment
+.env
+.env.local
