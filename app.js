@@ -6,6 +6,7 @@ let expenses = [];
 let currentTheme = 'emerald';
 let groups = [];
 let currentGroupId = null;
+let collapsedGroups = new Set(); // Track which groups are collapsed
 
 // Currency conversion rates (to USD) - Updated from Federal Reserve H.10 (September 2025)
 const CURRENCY_RATES = {
@@ -671,7 +672,7 @@ function updateRecentExpenses() {
 
         // Group badge
         const groupBadge = expense.group_id ?
-            `<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded ml-2">
+            `<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded ml-2">
                 ${groups.find(g => g.id === expense.group_id)?.name || 'Group'}
             </span>` : '';
 
@@ -2257,6 +2258,15 @@ async function deleteGroup(groupId, groupName) {
     await loadGroups();
 }
 
+function toggleGroupCollapse(groupId) {
+    if (collapsedGroups.has(groupId)) {
+        collapsedGroups.delete(groupId);
+    } else {
+        collapsedGroups.add(groupId);
+    }
+    updateExpensesDisplay();
+}
+
 function updateExpensesDisplay() {
     const container = document.getElementById('expenses-by-group');
 
@@ -2300,14 +2310,20 @@ function updateExpensesDisplay() {
     groups.forEach(group => {
         const groupExpensesList = groupedExpenses[group.id] || [];
         const isAdmin = group.myRole === 'admin';
+        const isCollapsed = collapsedGroups.has(group.id);
 
         html += `
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <div class="flex justify-between items-center mb-4">
-                    <div class="flex-1">
-                        <h3 class="text-lg font-semibold text-emerald-700">${group.name}</h3>
-                        ${group.description ? `<p class="text-sm text-gray-600">${group.description}</p>` : ''}
-                        <p class="text-xs text-gray-500 mt-1">${group.myRole === 'admin' ? '👑 Admin' : 'Member'} • ${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}</p>
+                    <div class="flex items-center gap-2 flex-1 cursor-pointer" onclick="toggleGroupCollapse('${group.id}')">
+                        <svg class="w-5 h-5 text-gray-500 transition-transform ${isCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        <div>
+                            <h3 class="text-lg font-semibold text-emerald-700">${group.name}</h3>
+                            ${group.description ? `<p class="text-sm text-gray-600">${group.description}</p>` : ''}
+                            <p class="text-xs text-gray-500 mt-1">${group.myRole === 'admin' ? '👑 Admin' : 'Member'} • ${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}</p>
+                        </div>
                     </div>
                     <div class="flex gap-2">
                         <button onclick="viewGroupMembers('${group.id}')"
@@ -2330,7 +2346,7 @@ function updateExpensesDisplay() {
                         ` : ''}
                     </div>
                 </div>
-                <div class="space-y-3">
+                <div class="space-y-3 ${isCollapsed ? 'hidden' : ''}">
                     ${groupExpensesList.length > 0
                         ? groupExpensesList.map(expense => renderExpenseCard(expense)).join('')
                         : '<p class="text-gray-500 text-sm text-center py-4">No expenses in this group yet</p>'
