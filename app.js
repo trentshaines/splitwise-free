@@ -411,6 +411,30 @@ async function loadExpenses() {
     });
 
     expenses = Array.from(expenseMap.values());
+
+    // Load participants for each expense
+    await Promise.all(expenses.map(async (expense) => {
+        const { data: participants, error: partError } = await supabase
+            .from('expense_participants')
+            .select(`
+                user_id,
+                share_amount,
+                profiles:user_id (
+                    id,
+                    email,
+                    full_name
+                )
+            `)
+            .eq('expense_id', expense.id);
+
+        if (!partError && participants) {
+            expense.participants = participants.map(p => ({
+                ...p.profiles,
+                share_amount: p.share_amount
+            }));
+        }
+    }));
+
     updateExpensesList();
     updateRecentExpenses();
 }
@@ -427,11 +451,15 @@ function updateRecentExpenses() {
     container.innerHTML = recentExpenses.map(expense => {
         const payerName = expense.payer?.full_name || expense.payer?.email || 'Unknown';
         const date = new Date(expense.created_at).toLocaleDateString();
+        const participantNames = expense.participants
+            ? expense.participants.map(p => p.full_name || p.email || 'Unknown').join(', ')
+            : 'Loading...';
         return `
             <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
                 <div>
                     <p class="font-medium">${expense.description}</p>
                     <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
+                    <p class="text-xs text-gray-500 mt-1">Split between: ${participantNames}</p>
                 </div>
                 <div class="text-right">
                     <p class="font-semibold text-emerald-600">$${expense.amount.toFixed(2)}</p>
@@ -452,12 +480,18 @@ function updateExpensesList() {
     container.innerHTML = expenses.map(expense => {
         const payerName = expense.payer?.full_name || expense.payer?.email || 'Unknown';
         const date = new Date(expense.created_at).toLocaleDateString();
+        const participantNames = expense.participants
+            ? expense.participants.map(p => {
+                const name = p.full_name || p.email || 'Unknown';
+                return `${name} ($${p.share_amount.toFixed(2)})`;
+              }).join(', ')
+            : 'Loading...';
         return `
             <div class="flex justify-between items-center p-4 border border-gray-200 rounded-md hover:bg-gray-50">
                 <div class="flex-1">
                     <p class="font-medium text-lg">${expense.description}</p>
                     <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
-                    <p class="text-xs text-gray-500 mt-1">Split: ${expense.split_type}</p>
+                    <p class="text-xs text-gray-500 mt-1">Split (${expense.split_type}): ${participantNames}</p>
                 </div>
                 <div class="flex items-center gap-4">
                     <p class="font-semibold text-lg text-emerald-600">$${expense.amount.toFixed(2)}</p>
