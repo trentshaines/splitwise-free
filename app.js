@@ -4,23 +4,23 @@ let friends = [];
 let allUsers = [];
 let expenses = [];
 
-// Currency conversion rates (to USD)
+// Currency conversion rates (to USD) - Updated from Federal Reserve H.10 (September 2025)
 const CURRENCY_RATES = {
     'USD': 1.00,
-    'EUR': 1.09,
-    'GBP': 1.27,
-    'JPY': 0.0067,
-    'CAD': 0.72,
-    'AUD': 0.64,
-    'CHF': 1.15,
-    'CNY': 0.14,
-    'INR': 0.012,
-    'MXN': 0.050,
-    'BRL': 0.20,
-    'KRW': 0.00075,
-    'SGD': 0.75,
-    'HKD': 0.13,
-    'NZD': 0.60
+    'EUR': 1.1692,    // 1 EUR = $1.1692 USD
+    'GBP': 1.3404,    // 1 GBP = $1.3404 USD
+    'JPY': 0.00669,   // 1 JPY = $0.00669 USD (149.52 JPY per USD)
+    'CAD': 0.717,     // 1 CAD = $0.717 USD (1.3946 CAD per USD)
+    'AUD': 0.6546,    // 1 AUD = $0.6546 USD
+    'CHF': 1.252,     // 1 CHF = $1.252 USD (0.7985 CHF per USD)
+    'CNY': 0.1402,    // 1 CNY = $0.1402 USD (7.1328 CNY per USD)
+    'INR': 0.01128,   // 1 INR = $0.01128 USD (88.65 INR per USD)
+    'MXN': 0.0544,    // 1 MXN = $0.0544 USD (18.38 MXN per USD)
+    'BRL': 0.1872,    // 1 BRL = $0.1872 USD (5.34 BRL per USD)
+    'KRW': 0.000709,  // 1 KRW = $0.000709 USD (1410.05 KRW per USD)
+    'SGD': 0.7739,    // 1 SGD = $0.7739 USD (1.292 SGD per USD)
+    'HKD': 0.1285,    // 1 HKD = $0.1285 USD (7.78 HKD per USD)
+    'NZD': 0.5769     // 1 NZD = $0.5769 USD
 };
 
 function convertToUSD(amount, currency) {
@@ -894,40 +894,6 @@ async function handleEditExpense(e) {
 
 async function updateDashboard() {
     await calculateAndDisplayBalances();
-    displayCurrencyRates();
-}
-
-function displayCurrencyRates() {
-    const container = document.getElementById('currency-rates-list');
-    if (!container) return;
-
-    const currencySymbols = {
-        'USD': '$',
-        'EUR': '€',
-        'GBP': '£',
-        'JPY': '¥',
-        'CAD': 'C$',
-        'AUD': 'A$',
-        'CHF': 'Fr',
-        'CNY': '¥',
-        'INR': '₹',
-        'MXN': 'MX$',
-        'BRL': 'R$',
-        'KRW': '₩',
-        'SGD': 'S$',
-        'HKD': 'HK$',
-        'NZD': 'NZ$'
-    };
-
-    container.innerHTML = Object.entries(CURRENCY_RATES)
-        .map(([code, rate]) => {
-            const symbol = currencySymbols[code] || code;
-            if (code === 'USD') {
-                return `<div class="flex justify-between py-1 border-b border-gray-200"><span class="font-medium">${code} ${symbol}</span><span>= $1.00</span></div>`;
-            }
-            return `<div class="flex justify-between py-1 border-b border-gray-200"><span>${code} ${symbol}</span><span>= $${rate.toFixed(4)}</span></div>`;
-        })
-        .join('');
 }
 
 async function calculateAndDisplayBalances() {
