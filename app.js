@@ -1030,6 +1030,72 @@ async function loadEditExpenseParticipants(expenseId) {
     updateEditExactAmounts(participantMap);
 }
 
+function updateEditExactAmounts(existingAmounts = {}) {
+    const splitType = document.getElementById('edit-expense-split-type').value;
+    const exactSection = document.getElementById('edit-exact-amounts-section');
+    const exactList = document.getElementById('edit-exact-amounts-list');
+
+    if (splitType !== 'exact') {
+        exactSection.classList.add('hidden');
+        return;
+    }
+
+    exactSection.classList.remove('hidden');
+
+    const selectedParticipants = Array.from(document.querySelectorAll('.edit-participant-checkbox:checked'));
+    const totalAmount = parseFloat(document.getElementById('edit-expense-amount').value) || 0;
+    const currency = document.getElementById('edit-expense-currency').value;
+
+    exactList.innerHTML = '';
+
+    selectedParticipants.forEach(checkbox => {
+        const userId = checkbox.value;
+        const userName = checkbox.parentElement.textContent.trim();
+        const existingAmount = existingAmounts[userId] || 0;
+
+        exactList.innerHTML += `
+            <div class="flex items-center gap-2">
+                <label class="flex-1 text-sm">${userName}:</label>
+                <input type="number" step="0.01" min="0"
+                    value="${existingAmount.toFixed(2)}"
+                    data-user-id="${userId}"
+                    class="edit-exact-amount-input w-32 px-2 py-1 border border-gray-300 rounded text-sm"
+                    oninput="updateEditExactAmountsSummary()" />
+            </div>
+        `;
+    });
+
+    updateEditExactAmountsSummary();
+}
+
+function updateEditExactAmountsSummary() {
+    const totalAmount = parseFloat(document.getElementById('edit-expense-amount').value) || 0;
+    const currency = document.getElementById('edit-expense-currency').value;
+    const exactInputs = document.querySelectorAll('.edit-exact-amount-input');
+
+    let totalEntered = 0;
+    exactInputs.forEach(input => {
+        const value = parseFloat(input.value) || 0;
+        totalEntered += value;
+    });
+
+    const remaining = totalAmount - totalEntered;
+
+    document.getElementById('edit-exact-total').textContent = `${totalEntered.toFixed(2)} ${currency}`;
+
+    const remainingEl = document.getElementById('edit-exact-remaining');
+    remainingEl.textContent = `${remaining.toFixed(2)} ${currency}`;
+
+    // Color code the remaining amount
+    if (Math.abs(remaining) < 0.01) {
+        remainingEl.className = 'font-semibold text-green-600';
+    } else if (remaining < 0) {
+        remainingEl.className = 'font-semibold text-red-600';
+    } else {
+        remainingEl.className = 'font-semibold text-orange-600';
+    }
+}
+
 async function handleEditExpense(e) {
     e.preventDefault();
     const submitButton = e.target.querySelector('button[type="submit"]');
@@ -1063,6 +1129,25 @@ async function handleEditExpense(e) {
             selectedParticipants.forEach(userId => {
                 shares[userId] = shareAmount;
             });
+        } else {
+            // Exact amounts
+            const exactInputs = document.querySelectorAll('.edit-exact-amount-input');
+            let total = 0;
+            exactInputs.forEach(input => {
+                const userId = input.dataset.userId;
+                const share = parseFloat(input.value) || 0;
+                shares[userId] = share;
+                total += share;
+            });
+
+            if (Math.abs(total - originalAmount) > 0.01) {
+                showToast(`Amounts must add up to ${originalAmount.toFixed(2)} ${currency}. Current total: ${total.toFixed(2)} ${currency}`, 'error');
+                return;
+            }
+            // Convert exact shares to USD
+            for (let userId in shares) {
+                shares[userId] = convertToUSD(shares[userId], currency);
+            }
         }
 
         // Update expense
