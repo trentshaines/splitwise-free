@@ -2446,9 +2446,27 @@ function renderGroupBalanceSummary(balances) {
         const netBalanceColor = netBalance > 0 ? 'text-green-600' : netBalance < 0 ? 'text-red-600' : 'text-gray-600';
         const netBalanceText = netBalance > 0 ? `+$${netBalance.toFixed(2)}` : netBalance < 0 ? `-$${Math.abs(netBalance).toFixed(2)}` : '$0.00';
 
+        // Determine emoji based on net balance
+        let emoji = '';
+        if (netBalance < -50) {
+            emoji = '😰'; // Owe a lot - anxious
+        } else if (netBalance < -10) {
+            emoji = '😅'; // Owe moderate - nervous smile
+        } else if (netBalance < -0.01) {
+            emoji = '😬'; // Owe a little - grimace
+        } else if (Math.abs(netBalance) <= 0.01) {
+            emoji = '😌'; // Balanced - relieved
+        } else if (netBalance < 10) {
+            emoji = '😊'; // Owed a little - happy
+        } else if (netBalance < 50) {
+            emoji = '🤑'; // Owed moderate - money face
+        } else {
+            emoji = '😎'; // Owed a lot - cool
+        }
+
         html += `
             <div class="flex justify-between items-center px-2.5 py-2 mt-2 border-t border-gray-300">
-                <span class="text-sm font-medium text-gray-700">Your net balance:</span>
+                <span class="text-sm font-medium text-gray-700">Your net balance: ${emoji}</span>
                 <span class="font-bold text-base ${netBalanceColor}">${netBalanceText}</span>
             </div>
         `;
@@ -2549,23 +2567,23 @@ function updateExpensesDisplay() {
                             ${membersList.length > 0 ? `<p class="text-xs text-gray-500 mt-1">Members: ${membersHtml}</p>` : ''}
                         </div>
                     </div>
-                    <div class="flex gap-2">
+                    <div class="flex gap-4 text-sm">
                         <button onclick="openAddExpenseModal('${group.id}')"
-                            class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
-                            Record an Expense
+                            class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
+                            <span class="text-lg">+</span> Expense
                         </button>
                         <button onclick="openGroupSettlementModal('${group.id}')"
-                            class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 transition">
-                            Record a Settlement
+                            class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
+                            <span class="text-lg">+</span> Settlement
                         </button>
                         ${isAdmin ? `
                             <button onclick="openEditGroupModal('${group.id}')"
-                                class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-700 transition">
-                                Edit Group
+                                class="text-gray-600 hover:text-gray-900 font-medium transition">
+                                Edit
                             </button>
                             <button onclick="openInviteGroupModal('${group.id}')"
-                                class="bg-purple-600 text-white px-3 py-1.5 rounded text-sm hover:bg-purple-700 transition">
-                                Invite to Group
+                                class="text-gray-600 hover:text-gray-900 font-medium transition">
+                                Invite
                             </button>
                         ` : ''}
                     </div>
@@ -2616,7 +2634,7 @@ function renderExpenseCard(expense) {
     const myBalanceSign = myBalance > 0 ? '+' : myBalance < 0 ? '-' : '';
 
     return `
-        <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md hover:bg-gray-50">
+        <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
             <div class="flex-1">
                 <p class="font-medium">${expense.description}</p>
                 <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
@@ -2645,31 +2663,29 @@ function renderSettlementCard(settlement) {
     const toName = settlement.to_user === currentUser.id ? 'you' : (toUser?.full_name || toUser?.email || 'Unknown');
 
     const isCurrentUserPayer = settlement.from_user === currentUser.id;
+    const myBalance = isCurrentUserPayer ? -settlement.amount : settlement.amount;
+    const myBalanceColor = myBalance > 0 ? 'text-green-600' : 'text-red-600';
+    const myBalanceSign = myBalance > 0 ? '+' : '';
 
     return `
-        <div class="flex justify-between items-center p-3 border-2 border-blue-200 bg-blue-50 rounded-md">
+        <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
             <div class="flex-1">
-                <div class="flex items-center gap-2">
-                    <span class="text-lg">💸</span>
-                    <p class="font-medium text-blue-900">Settlement</p>
-                </div>
-                <p class="text-sm text-gray-700 mt-1">
+                <p class="font-medium">Settlement</p>
+                <p class="text-sm text-gray-600">
                     ${isCurrentUserPayer
-                        ? `<span class="font-medium">You</span> paid <span class="font-medium">${toName}</span>`
-                        : `<span class="font-medium">${fromName}</span> paid <span class="font-medium">you</span>`
-                    }
+                        ? `${fromName} paid ${toName}`
+                        : `${fromName} paid ${toName}`
+                    } • ${date}
                 </p>
-                <p class="text-xs text-gray-600 mt-1">${date}</p>
             </div>
-            <div class="text-right flex flex-col items-end gap-2">
-                <p class="font-semibold text-lg ${isCurrentUserPayer ? 'text-red-600' : 'text-green-600'}">
-                    ${isCurrentUserPayer ? '-' : '+'}$${settlement.amount.toFixed(2)}
-                </p>
-                <div class="flex gap-2">
+            <div class="text-right">
+                <div class="flex flex-col items-end mb-2">
+                    <p class="font-semibold text-blue-600">$${settlement.amount.toFixed(2)}</p>
+                    <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
+                </div>
+                <div class="flex gap-2 justify-end">
                     <button onclick="openEditSettlementModal('${settlement.id}')"
-                        class="text-xs text-blue-600 hover:text-blue-800 underline">
-                        Edit
-                    </button>
+                        class="text-xs text-blue-600 hover:text-blue-700">Edit</button>
                 </div>
             </div>
         </div>
@@ -2725,7 +2741,7 @@ function changeTheme(theme) {
 
 function applyTheme(theme) {
     // Remove all theme classes
-    document.body.classList.remove('theme-emerald', 'theme-blue', 'theme-purple', 'theme-rose', 'theme-orange', 'theme-dark');
+    document.body.classList.remove('theme-emerald', 'theme-artdeco');
 
     // Add new theme class
     document.body.classList.add(`theme-${theme}`);
