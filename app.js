@@ -9,6 +9,8 @@ let groupSettlements = []; // Track group settlements
 let currentGroupId = null;
 let collapsedGroups = new Set(); // Track which groups are collapsed
 let editingSettlementId = null; // Track settlement being edited
+let notifications = []; // Track notifications
+let unreadNotificationsCount = 0; // Track unread count
 
 // Helper function to wrap Supabase calls with timeout
 async function withTimeout(promise, timeoutMs = 10000, errorMessage = 'Request timed out') {
@@ -217,6 +219,7 @@ async function handleAuthSuccess(user) {
     await loadAllUsers();
     await loadGroups();
     await loadExpenses();
+    await loadNotifications();
 }
 
 async function ensureProfile(user) {
@@ -307,9 +310,6 @@ async function loadFriends() {
     friends = data.map(f => f.profiles);
     updateFriendsList();
     updateSettleFriendsList();
-
-    // Load pending friend requests (where current user is the recipient)
-    await loadFriendRequests();
 }
 
 async function loadAllUsers() {
@@ -407,122 +407,6 @@ function updateSettleFriendsList() {
     });
 }
 
-async function loadFriendRequests() {
-    const container = document.getElementById('friend-requests-list');
-    const section = document.getElementById('friend-requests-section');
-
-    // Get requests where current user is the recipient (friend_id)
-    const { data, error } = await supabase
-        .from('friendships')
-        .select(`
-            id,
-            user_id,
-            created_at,
-            requester:user_id (
-                id,
-                email,
-                full_name
-            )
-        `)
-        .eq('friend_id', currentUser.id)
-        .eq('status', 'pending');
-
-    if (error) {
-        console.error('Error loading friend requests:', error);
-        return;
-    }
-
-    if (!data || data.length === 0) {
-        section.classList.add('hidden');
-        return;
-    }
-
-    section.classList.remove('hidden');
-    container.innerHTML = data.map(request => {
-        const requesterName = request.requester?.full_name || request.requester?.email || 'Unknown';
-        const date = new Date(request.created_at).toLocaleDateString();
-
-        return `
-            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
-                <div>
-                    <p class="font-medium">${requesterName}</p>
-                    <p class="text-xs text-gray-500 mt-1">${date}</p>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="acceptFriendRequest('${request.id}', '${request.user_id}')"
-                        class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
-                        Accept
-                    </button>
-                    <button onclick="declineFriendRequest('${request.id}')"
-                        class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
-                        Decline
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-async function acceptFriendRequest(requestId, requesterId) {
-    try {
-        // Delete the pending request
-        await supabase
-            .from('friendships')
-            .delete()
-            .eq('id', requestId);
-
-        // Create accepted friendship (both directions)
-        const { error: error1 } = await supabase
-            .from('friendships')
-            .insert({
-                user_id: currentUser.id,
-                friend_id: requesterId,
-                status: 'accepted'
-            });
-
-        const { error: error2 } = await supabase
-            .from('friendships')
-            .insert({
-                user_id: requesterId,
-                friend_id: currentUser.id,
-                status: 'accepted'
-            });
-
-        if (error1 || error2) {
-            console.error('Accept error:', error1 || error2);
-            showToast('Error accepting friend request', 'error');
-            return;
-        }
-
-        showToast('✓ Friend request accepted!', 'success');
-        await loadFriends();
-    } catch (err) {
-        console.error('Accept error:', err);
-        showToast('Error accepting friend request', 'error');
-    }
-}
-
-async function declineFriendRequest(requestId) {
-    try {
-        const { error } = await supabase
-            .from('friendships')
-            .delete()
-            .eq('id', requestId);
-
-        if (error) {
-            console.error('Decline error:', error);
-            showToast('Error declining friend request', 'error');
-            return;
-        }
-
-        showToast('Friend request declined', 'success');
-        await loadFriendRequests();
-    } catch (err) {
-        console.error('Decline error:', err);
-        showToast('Error declining friend request', 'error');
-    }
-}
-
 async function handleAddFriend(e) {
     e.preventDefault();
     const email = document.getElementById('friend-email').value;
@@ -551,41 +435,55 @@ async function handleAddFriend(e) {
             return;
         }
 
-        // Check if already friends or request exists
+        // Check if already friends
         const { data: existing } = await supabase
             .from('friendships')
             .select('*')
             .eq('user_id', currentUser.id)
             .eq('friend_id', profiles.id)
+            .eq('status', 'accepted')
             .single();
 
         if (existing) {
-            if (existing.status === 'accepted') {
-                showToast('Already friends with this user!', 'error');
-            } else if (existing.status === 'pending') {
-                showToast('Friend request already sent!', 'error');
-            }
+            showToast('Already friends with this user!', 'error');
             return;
         }
 
-        // Create friend request (only one direction, pending)
+        // Check if notification already exists (request already sent)
+        const { data: existingNotification } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', profiles.id)
+            .eq('related_user_id', currentUser.id)
+            .eq('type', 'friend_request')
+            .eq('is_read', false)
+            .single();
+
+        if (existingNotification) {
+            showToast('Friend request already sent!', 'error');
+            return;
+        }
+
+        // Create friend request notification
+        const senderName = currentUser.user_metadata?.full_name || currentUser.email;
         const { error } = await supabase
-            .from('friendships')
+            .from('notifications')
             .insert({
-                user_id: currentUser.id,
-                friend_id: profiles.id,
-                status: 'pending'
+                user_id: profiles.id,
+                type: 'friend_request',
+                title: 'Friend Request',
+                message: `${senderName} wants to be friends`,
+                related_user_id: currentUser.id
             });
 
         if (error) {
-            console.error('Friendship error:', error);
+            console.error('Notification error:', error);
             showToast(`Error sending friend request: ${error.message}`, 'error');
             return;
         }
 
-        showToast(`✓ Friend request sent to ${profiles.full_name || profiles.email}!`, 'success');
+        showToast(`Friend request sent to ${profiles.full_name || profiles.email}!`, 'success');
         closeAddFriendModal();
-        await loadFriends();
     } finally {
         // Re-enable button
         submitButton.disabled = false;
@@ -1983,7 +1881,7 @@ async function loadGroups() {
     }));
 
     updateExpensesDisplay();
-    await loadGroupInvites();
+    await loadNotifications();
 }
 
 async function handleCreateGroup(e) {
@@ -2074,18 +1972,37 @@ async function handleCreateGroup(e) {
                 status: 'pending'
             }));
 
-            const { error: inviteError } = await supabase
+            const { data: inviteData, error: inviteError } = await supabase
                 .from('group_invites')
-                .insert(invites);
+                .insert(invites)
+                .select();
 
             if (inviteError) {
                 console.error('Invite error:', inviteError);
                 showToast(`Group created but error sending invitations: ${inviteError.message}`, 'error');
             } else {
-                showToast(`✓ Group "${name}" created and ${selectedMembers.length} invitation(s) sent!`, 'success');
+                // Create notifications for each invitee
+                const inviterName = currentUser.full_name || currentUser.email;
+                const notificationPromises = inviteData.map(invite =>
+                    addNotification(
+                        invite.invitee_id,
+                        'group_invite',
+                        'Group Invitation',
+                        `${inviterName} invited you to join "${name}"`,
+                        {
+                            group_id: group.id,
+                            invite_id: invite.id,
+                            inviter_id: currentUser.id,
+                            group_name: name
+                        }
+                    )
+                );
+                await Promise.all(notificationPromises);
+
+                showToast(`Group "${name}" created and ${selectedMembers.length} invitation(s) sent!`, 'success');
             }
         } else {
-            showToast(`✓ Group "${name}" created successfully!`, 'success');
+            showToast(`Group "${name}" created successfully!`, 'success');
         }
 
         closeCreateGroupModal();
@@ -2096,68 +2013,7 @@ async function handleCreateGroup(e) {
     }
 }
 
-async function loadGroupInvites() {
-    const container = document.getElementById('group-invites-list');
-    const section = document.getElementById('group-invites-section');
-
-    // Get invites where current user is the invitee
-    const { data, error } = await supabase
-        .from('group_invites')
-        .select(`
-            id,
-            group_id,
-            created_at,
-            groups:group_id (
-                id,
-                name,
-                description
-            ),
-            inviter:inviter_id (
-                id,
-                email,
-                full_name
-            )
-        `)
-        .eq('invitee_id', currentUser.id)
-        .eq('status', 'pending');
-
-    if (error) {
-        console.error('Error loading group invites:', error);
-        return;
-    }
-
-    if (!data || data.length === 0) {
-        section.classList.add('hidden');
-        return;
-    }
-
-    section.classList.remove('hidden');
-    container.innerHTML = data.map(invite => {
-        const inviterName = invite.inviter?.full_name || invite.inviter?.email || 'Unknown';
-        const groupName = invite.groups?.name || 'Unknown Group';
-        const date = new Date(invite.created_at).toLocaleDateString();
-
-        return `
-            <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
-                <div>
-                    <p class="font-medium">${groupName}</p>
-                    <p class="text-sm text-gray-600">Invited by ${inviterName}</p>
-                    <p class="text-xs text-gray-500 mt-1">${date}</p>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="acceptGroupInvite('${invite.id}', '${invite.group_id}')"
-                        class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
-                        Accept
-                    </button>
-                    <button onclick="declineGroupInvite('${invite.id}')"
-                        class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
-                        Decline
-                    </button>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
+// loadGroupInvites function removed - group invites now handled via notifications system
 
 async function handleInviteToGroup(e) {
     e.preventDefault();
@@ -2214,8 +2070,12 @@ async function handleInviteToGroup(e) {
         const invitedUser = allUsers.find(u => u.id === userId);
         const userName = invitedUser?.full_name || invitedUser?.email || 'User';
 
+        // Get group info
+        const group = groups.find(g => g.id === currentGroupId);
+        const groupName = group?.name || 'Unknown Group';
+
         // Create invitation
-        const { error } = await withTimeout(
+        const { data: inviteData, error } = await withTimeout(
             supabase
                 .from('group_invites')
                 .insert({
@@ -2223,7 +2083,8 @@ async function handleInviteToGroup(e) {
                     inviter_id: currentUser.id,
                     invitee_id: userId,
                     status: 'pending'
-                }),
+                })
+                .select(),
             5000
         );
 
@@ -2233,7 +2094,22 @@ async function handleInviteToGroup(e) {
             return;
         }
 
-        showToast(`✓ Invitation sent to ${userName}!`, 'success');
+        // Create notification for the invitee
+        const inviterName = currentUser.full_name || currentUser.email;
+        await addNotification(
+            userId,
+            'group_invite',
+            'Group Invitation',
+            `${inviterName} invited you to join "${groupName}"`,
+            {
+                group_id: currentGroupId,
+                invite_id: inviteData[0].id,
+                inviter_id: currentUser.id,
+                group_name: groupName
+            }
+        );
+
+        showToast(`Invitation sent to ${userName}!`, 'success');
         closeInviteGroupModal();
     } finally {
         submitButton.disabled = false;
@@ -2241,57 +2117,8 @@ async function handleInviteToGroup(e) {
     }
 }
 
-async function acceptGroupInvite(inviteId, groupId) {
-    try {
-        // Delete the invite
-        await supabase
-            .from('group_invites')
-            .delete()
-            .eq('id', inviteId);
-
-        // Add user as member
-        const { error } = await supabase
-            .from('group_members')
-            .insert({
-                group_id: groupId,
-                user_id: currentUser.id,
-                role: 'member'
-            });
-
-        if (error) {
-            console.error('Accept error:', error);
-            showToast('Error accepting invitation', 'error');
-            return;
-        }
-
-        showToast('✓ Joined group successfully!', 'success');
-        await loadGroups();
-    } catch (err) {
-        console.error('Accept error:', err);
-        showToast('Error accepting invitation', 'error');
-    }
-}
-
-async function declineGroupInvite(inviteId) {
-    try {
-        const { error } = await supabase
-            .from('group_invites')
-            .delete()
-            .eq('id', inviteId);
-
-        if (error) {
-            console.error('Decline error:', error);
-            showToast('Error declining invitation', 'error');
-            return;
-        }
-
-        showToast('Group invitation declined', 'success');
-        await loadGroupInvites();
-    } catch (err) {
-        console.error('Decline error:', err);
-        showToast('Error declining invitation', 'error');
-    }
-}
+// Old acceptGroupInvite and declineGroupInvite functions removed
+// Group invites now handled via notifications - see acceptGroupInviteFromNotification and declineGroupInviteFromNotification
 
 async function viewGroupMembers(groupId) {
     const { data, error } = await supabase
@@ -2567,10 +2394,10 @@ function renderGroupBalanceSummary(balances) {
     const nonZeroBalances = Object.entries(balances).filter(([_, amount]) => Math.abs(amount) > 0.01);
 
     if (nonZeroBalances.length === 0) {
-        return '<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-3 mb-4"><p class="text-green-700 text-sm font-medium">All settled up in this group! 🎉</p></div>';
+        return '<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-2.5 mb-4"><p class="text-green-700 text-sm font-medium">All settled up in this group! 🎉</p></div>';
     }
 
-    let html = '<div class="mb-6 bg-gray-50 rounded-lg p-4 space-y-2.5">';
+    let html = '<div class="mb-4 bg-gray-50 rounded-lg p-3 space-y-1.5">';
     let totalOwed = 0;
     let totalOwes = 0;
 
@@ -2581,18 +2408,18 @@ function renderGroupBalanceSummary(balances) {
         if (amount > 0) {
             // I owe them
             html += `
-                <div class="flex justify-between items-center px-3 py-2 bg-white border-l-4 border-red-500 rounded shadow-sm">
+                <div class="flex justify-between items-center px-2.5 py-1.5 bg-white border-l-3 border-red-500 rounded shadow-sm">
                     <span class="text-sm text-gray-700">You owe <strong class="text-gray-900">${name}</strong></span>
-                    <span class="font-bold text-lg text-red-600">$${amount.toFixed(2)}</span>
+                    <span class="font-semibold text-red-600">$${amount.toFixed(2)}</span>
                 </div>
             `;
             totalOwes += amount;
         } else {
             // They owe me
             html += `
-                <div class="flex justify-between items-center px-3 py-2 bg-white border-l-4 border-green-500 rounded shadow-sm">
+                <div class="flex justify-between items-center px-2.5 py-1.5 bg-white border-l-3 border-green-500 rounded shadow-sm">
                     <span class="text-sm text-gray-700"><strong class="text-gray-900">${name}</strong> owes you</span>
-                    <span class="font-bold text-lg text-green-600">$${Math.abs(amount).toFixed(2)}</span>
+                    <span class="font-semibold text-green-600">$${Math.abs(amount).toFixed(2)}</span>
                 </div>
             `;
             totalOwed += Math.abs(amount);
@@ -2606,9 +2433,9 @@ function renderGroupBalanceSummary(balances) {
         const netBalanceText = netBalance > 0 ? `+$${netBalance.toFixed(2)}` : netBalance < 0 ? `-$${Math.abs(netBalance).toFixed(2)}` : '$0.00';
 
         html += `
-            <div class="flex justify-between items-center px-3 py-3 mt-3 border-t-2 border-gray-300">
-                <span class="text-sm font-semibold text-gray-700">Your net balance:</span>
-                <span class="font-bold text-xl ${netBalanceColor}">${netBalanceText}</span>
+            <div class="flex justify-between items-center px-2.5 py-2 mt-2 border-t border-gray-300">
+                <span class="text-sm font-medium text-gray-700">Your net balance:</span>
+                <span class="font-bold text-base ${netBalanceColor}">${netBalanceText}</span>
             </div>
         `;
     }
@@ -2733,6 +2560,9 @@ function updateExpensesDisplay() {
                 <!-- Group Balance Summary -->
                 ${groupBalanceHtml}
 
+                <!-- Divider -->
+                <div class="border-t border-gray-200 my-4 ${isCollapsed ? 'hidden' : ''}"></div>
+
                 <div class="space-y-3 ${isCollapsed ? 'hidden' : ''}">
                     ${combinedItems.length > 0
                         ? combinedItems.map(item =>
@@ -2826,10 +2656,6 @@ function renderSettlementCard(settlement) {
                         class="text-xs text-blue-600 hover:text-blue-800 underline">
                         Edit
                     </button>
-                    <button onclick="deleteSettlement('${settlement.id}')"
-                        class="text-xs text-red-600 hover:text-red-800 underline">
-                        Delete
-                    </button>
                 </div>
             </div>
         </div>
@@ -2892,4 +2718,434 @@ function applyTheme(theme) {
 
     // Also set data attribute for additional CSS targeting if needed
     document.body.setAttribute('data-theme', theme);
+}
+
+// ===========================
+// Notifications System
+// ===========================
+
+function toggleNotificationsDropdown() {
+    const dropdown = document.getElementById('notifications-dropdown');
+    const isHidden = dropdown.classList.contains('hidden');
+
+    if (isHidden) {
+        // Show dropdown
+        dropdown.classList.remove('hidden');
+        // Add click-outside listener
+        setTimeout(() => {
+            document.addEventListener('click', handleNotificationsClickOutside);
+        }, 0);
+    } else {
+        // Hide dropdown
+        dropdown.classList.add('hidden');
+        document.removeEventListener('click', handleNotificationsClickOutside);
+    }
+}
+
+function handleNotificationsClickOutside(event) {
+    const dropdown = document.getElementById('notifications-dropdown');
+    const bellButton = event.target.closest('button[onclick="toggleNotificationsDropdown()"]');
+
+    // Don't close if clicking the bell button (toggle handles that) or inside the dropdown
+    if (!bellButton && !dropdown.contains(event.target)) {
+        dropdown.classList.add('hidden');
+        document.removeEventListener('click', handleNotificationsClickOutside);
+    }
+}
+
+async function loadNotifications() {
+    try {
+        const { data, error } = await supabase
+            .from('notifications')
+            .select(`
+                *,
+                related_user:related_user_id (
+                    id,
+                    email,
+                    full_name
+                )
+            `)
+            .eq('user_id', currentUser.id)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error loading notifications:', error);
+            notifications = [];
+        } else {
+            // Transform database format to app format
+            notifications = data.map(n => ({
+                id: n.id,
+                type: n.type,
+                title: n.title,
+                message: n.message,
+                timestamp: n.created_at,
+                read: n.is_read,
+                data: n.metadata || {},
+                related_user: n.related_user,
+                related_user_id: n.related_user_id
+            }));
+        }
+
+        renderNotifications();
+    } catch (error) {
+        console.error('Error loading notifications:', error);
+        showToast('Failed to load notifications', 'error');
+    }
+}
+
+function renderNotifications() {
+    const notificationsList = document.getElementById('notifications-list');
+    const badge = document.getElementById('notifications-badge');
+
+    // Count unread notifications
+    unreadNotificationsCount = notifications.filter(n => !n.read).length;
+
+    // Update badge
+    if (unreadNotificationsCount > 0) {
+        badge.textContent = unreadNotificationsCount;
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+
+    // Render notifications list
+    if (notifications.length === 0) {
+        notificationsList.innerHTML = `
+            <div class="p-8 text-center text-gray-500 text-sm">
+                No notifications
+            </div>
+        `;
+        return;
+    }
+
+    notificationsList.innerHTML = notifications.map(notification => {
+        const timeAgo = getTimeAgo(new Date(notification.timestamp));
+        const unreadClass = notification.read ? '' : 'notification-unread';
+        const isGroupInvite = notification.type === 'group_invite';
+        const isFriendRequest = notification.type === 'friend_request';
+        const hasActions = (isGroupInvite || isFriendRequest) && !notification.read;
+
+        // For notifications with action buttons, don't auto-mark as read on click
+        const clickAction = hasActions ? '' : `onclick="markNotificationAsRead('${notification.id}')"`;
+
+        return `
+            <div class="notification-item ${unreadClass} p-4 border-b border-gray-100 ${!hasActions ? 'cursor-pointer hover:bg-gray-50' : ''}"
+                ${clickAction}>
+                <div class="flex items-start gap-3">
+                    <div class="flex-shrink-0 mt-1">
+                        ${getNotificationIcon(notification.type)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-start justify-between gap-2">
+                            <p class="font-medium text-sm text-gray-900">${notification.title}</p>
+                            ${!notification.read ? '<div class="flex-shrink-0 w-2 h-2 bg-blue-600 rounded-full"></div>' : ''}
+                        </div>
+                        <p class="text-sm text-gray-600 mt-1">${notification.message}</p>
+                        <p class="text-xs text-gray-500 mt-1">${timeAgo}</p>
+                        ${isFriendRequest && !notification.read ? `
+                            <div class="flex gap-2 mt-3" onclick="event.stopPropagation()">
+                                <button onclick="acceptFriendRequestFromNotification('${notification.id}', '${notification.related_user_id}')"
+                                    class="flex-1 bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                                    Accept
+                                </button>
+                                <button onclick="declineFriendRequestFromNotification('${notification.id}')"
+                                    class="flex-1 bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
+                                    Decline
+                                </button>
+                            </div>
+                        ` : ''}
+                        ${isGroupInvite && !notification.read ? `
+                            <div class="flex gap-2 mt-3" onclick="event.stopPropagation()">
+                                <button onclick="acceptGroupInviteFromNotification('${notification.id}', '${notification.data.group_id}', '${notification.data.invite_id}')"
+                                    class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700 transition">
+                                    Accept
+                                </button>
+                                <button onclick="declineGroupInviteFromNotification('${notification.id}', '${notification.data.invite_id}')"
+                                    class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-300 transition">
+                                    Decline
+                                </button>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function getNotificationIcon(type) {
+    const iconClasses = "w-5 h-5 text-gray-600";
+
+    switch (type) {
+        case 'friend_request':
+            return `
+                <svg class="${iconClasses}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z">
+                    </path>
+                </svg>
+            `;
+        case 'group_invite':
+            return `
+                <svg class="${iconClasses}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z">
+                    </path>
+                </svg>
+            `;
+        case 'expense_added':
+            return `
+                <svg class="${iconClasses}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                    </path>
+                </svg>
+            `;
+        default:
+            return `
+                <svg class="${iconClasses}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                    </path>
+                </svg>
+            `;
+    }
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+
+    return date.toLocaleDateString();
+}
+
+async function markNotificationAsRead(notificationId) {
+    const notification = notifications.find(n => n.id === notificationId);
+
+    if (notification && !notification.read) {
+        // Update database
+        const { error } = await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('id', notificationId);
+
+        if (error) {
+            console.error('Error marking notification as read:', error);
+            return;
+        }
+
+        // Update local state
+        notification.read = true;
+        renderNotifications();
+
+        // Handle notification action based on type
+        handleNotificationAction(notification);
+    }
+}
+
+async function markAllNotificationsAsRead() {
+    const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
+
+    if (unreadIds.length === 0) return;
+
+    // Update database
+    const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .in('id', unreadIds);
+
+    if (error) {
+        console.error('Error marking all notifications as read:', error);
+        showToast('Failed to mark notifications as read', 'error');
+        return;
+    }
+
+    // Update local state
+    notifications.forEach(n => n.read = true);
+    renderNotifications();
+    showToast('All notifications marked as read', 'success');
+}
+
+function handleNotificationAction(notification) {
+    // Placeholder for handling notification actions
+    // In future tasks, this will navigate to relevant sections or open modals
+
+    switch (notification.type) {
+        case 'friend_request':
+            // Will navigate to Friends tab and show friend requests
+            console.log('Navigate to friend requests');
+            break;
+        case 'group_invite':
+            // Will navigate to Expenses tab and show group invites
+            console.log('Navigate to group invites');
+            break;
+        case 'expense_added':
+            // Will navigate to relevant expense
+            console.log('Navigate to expense');
+            break;
+        default:
+            console.log('Unknown notification type:', notification.type);
+    }
+}
+
+async function addNotification(userId, type, title, message, data = {}) {
+    try {
+        const { error } = await supabase
+            .from('notifications')
+            .insert({
+                user_id: userId,
+                type,
+                title,
+                message,
+                metadata: data
+            });
+
+        if (error) {
+            console.error('Error creating notification:', error);
+            return null;
+        }
+
+        return true;
+    } catch (err) {
+        console.error('Error creating notification:', err);
+        return null;
+    }
+}
+
+async function acceptFriendRequestFromNotification(notificationId, requesterId) {
+    try {
+        // Create accepted friendship (both directions)
+        const { error: error1 } = await supabase
+            .from('friendships')
+            .insert({
+                user_id: currentUser.id,
+                friend_id: requesterId,
+                status: 'accepted'
+            });
+
+        const { error: error2 } = await supabase
+            .from('friendships')
+            .insert({
+                user_id: requesterId,
+                friend_id: currentUser.id,
+                status: 'accepted'
+            });
+
+        if (error1 || error2) {
+            console.error('Accept error:', error1 || error2);
+            showToast('Error accepting friend request', 'error');
+            return;
+        }
+
+        // Mark notification as read
+        const { error: readError } = await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('id', notificationId);
+
+        if (readError) {
+            console.error('Error marking notification as read:', readError);
+        }
+
+        showToast('Friend request accepted!', 'success');
+        await loadFriends();
+        await loadNotifications();
+    } catch (err) {
+        console.error('Accept error:', err);
+        showToast('Error accepting friend request', 'error');
+    }
+}
+
+async function declineFriendRequestFromNotification(notificationId) {
+    try {
+        // Mark notification as read
+        const { error } = await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('id', notificationId);
+
+        if (error) {
+            console.error('Error marking notification as read:', error);
+            showToast('Error declining friend request', 'error');
+            return;
+        }
+
+        showToast('Friend request declined', 'success');
+        await loadNotifications();
+    } catch (err) {
+        console.error('Decline error:', err);
+        showToast('Error declining friend request', 'error');
+    }
+}
+
+async function acceptGroupInviteFromNotification(notificationId, groupId, inviteId) {
+    try {
+        // Delete the invite
+        await supabase
+            .from('group_invites')
+            .delete()
+            .eq('id', inviteId);
+
+        // Add user as member
+        const { error } = await supabase
+            .from('group_members')
+            .insert({
+                group_id: groupId,
+                user_id: currentUser.id,
+                role: 'member'
+            });
+
+        if (error) {
+            console.error('Accept error:', error);
+            showToast('Error accepting invitation', 'error');
+            return;
+        }
+
+        // Mark notification as read
+        await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('id', notificationId);
+
+        showToast('Joined group successfully!', 'success');
+
+        // Reload data
+        await loadGroups();
+        await loadNotifications();
+    } catch (err) {
+        console.error('Accept error:', err);
+        showToast('Error accepting invitation', 'error');
+    }
+}
+
+async function declineGroupInviteFromNotification(notificationId, inviteId) {
+    try {
+        // Delete the invite
+        const { error: inviteError } = await supabase
+            .from('group_invites')
+            .delete()
+            .eq('id', inviteId);
+
+        if (inviteError) {
+            console.error('Decline error:', inviteError);
+            showToast('Error declining invitation', 'error');
+            return;
+        }
+
+        // Mark notification as read and delete it
+        await supabase
+            .from('notifications')
+            .delete()
+            .eq('id', notificationId);
+
+        showToast('Group invitation declined', 'success');
+        await loadNotifications();
+    } catch (err) {
+        console.error('Decline error:', err);
+        showToast('Error declining invitation', 'error');
+    }
 }

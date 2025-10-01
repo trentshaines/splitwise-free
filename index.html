@@ -39,6 +39,20 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
+        /* Notifications dropdown */
+        #notifications-dropdown {
+            max-height: 500px;
+        }
+        .notification-item {
+            transition: background-color 0.2s;
+        }
+        .notification-item:hover {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        .notification-unread {
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+
         /* Theme color definitions */
         .theme-emerald {
             --primary-50: 240, 253, 244;
@@ -165,6 +179,23 @@
             background-color: rgba(134, 239, 172, 0.1) !important;
         }
 
+        .theme-dark #notifications-dropdown {
+            background-color: rgb(51, 65, 85) !important;
+            border-color: rgb(71, 85, 105) !important;
+        }
+
+        .theme-dark .notification-item {
+            border-color: rgb(71, 85, 105) !important;
+        }
+
+        .theme-dark .notification-item:hover {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+        }
+
+        .theme-dark .notification-unread {
+            background-color: rgba(59, 130, 246, 0.15) !important;
+        }
+
         /* Universal theme color overrides */
         .bg-emerald-600, .bg-emerald-700,
         .hover\:bg-emerald-700:hover,
@@ -200,6 +231,17 @@
         .tab-btn.border-emerald-600 {
             border-color: rgb(var(--primary-600)) !important;
             color: rgb(var(--primary-600)) !important;
+        }
+
+        /* Text selection highlight - use blue */
+        ::selection {
+            background-color: rgba(59, 130, 246, 0.3);
+            color: inherit;
+        }
+
+        ::-moz-selection {
+            background-color: rgba(59, 130, 246, 0.3);
+            color: inherit;
         }
     </style>
 </head>
@@ -277,6 +319,42 @@
                 <h1 class="text-2xl logo-font app-brand">Splitwiser</h1>
                 <div class="flex items-center gap-4">
                     <span id="user-display" class="text-sm text-gray-600"></span>
+                    <!-- Notifications Bell -->
+                    <div class="relative">
+                        <button onclick="toggleNotificationsDropdown()"
+                            class="relative p-2 text-gray-600 hover:text-gray-900 transition">
+                            <!-- Bell Icon -->
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9">
+                                </path>
+                            </svg>
+                            <!-- Unread Badge -->
+                            <span id="notifications-badge"
+                                class="hidden absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                                0
+                            </span>
+                        </button>
+                        <!-- Notifications Dropdown -->
+                        <div id="notifications-dropdown"
+                            class="hidden absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                            <div class="p-4 border-b border-gray-200">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="font-semibold text-gray-900">Notifications</h3>
+                                    <button onclick="markAllNotificationsAsRead()"
+                                        class="text-xs text-gray-600 hover:text-gray-900">
+                                        Mark all as read
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="notifications-list" class="max-h-96 overflow-y-auto">
+                                <!-- Notifications will be inserted here -->
+                                <div class="p-8 text-center text-gray-500 text-sm">
+                                    No notifications
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <button onclick="logout()"
                         class="text-sm text-red-600 hover:text-red-700 font-medium">
                         Logout
@@ -306,23 +384,12 @@
 
             <!-- Expenses Tab -->
             <div id="tab-expenses" class="tab-content">
-                <!-- Group Invites -->
-                <div id="group-invites-section" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 hidden">
-                    <h2 class="text-xl font-semibold mb-4">Group Invitations</h2>
-                    <div id="group-invites-list" class="space-y-3">
-                        <p class="text-gray-500 text-sm">No pending invitations</p>
-                    </div>
-                </div>
-
                 <!-- Header with actions -->
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-semibold">Expenses & Groups</h2>
-                    <div class="flex gap-2">
-                        <button onclick="openCreateGroupModal()"
-                            class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition text-sm font-medium">
-                            New Group
-                        </button>
-                    </div>
+                <div class="mb-6">
+                    <button onclick="openCreateGroupModal()"
+                        class="text-gray-600 hover:text-gray-900 text-sm font-medium transition flex items-center gap-1">
+                        <span class="text-lg">+</span> New Group
+                    </button>
                 </div>
 
                 <!-- Expenses grouped by group -->
@@ -333,14 +400,6 @@
 
             <!-- Friends Tab -->
             <div id="tab-friends" class="tab-content hidden">
-                <!-- Friend Requests -->
-                <div id="friend-requests-section" class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 hidden">
-                    <h2 class="text-xl font-semibold mb-4">Friend Requests</h2>
-                    <div id="friend-requests-list" class="space-y-3">
-                        <p class="text-gray-500 text-sm">No pending requests</p>
-                    </div>
-                </div>
-
                 <!-- Friends List -->
                 <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                     <div class="flex justify-between items-center mb-4">
