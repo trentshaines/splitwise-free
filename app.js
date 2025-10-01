@@ -2035,31 +2035,39 @@ async function handleInviteToGroup(e) {
             return;
         }
 
+        console.log('Checking existing members...');
         // Check if already a member
-        const { data: existingMembers } = await withTimeout(
-            supabase
-                .from('group_members')
-                .select('*')
-                .eq('group_id', currentGroupId)
-                .eq('user_id', userId),
-            5000
-        );
+        const { data: existingMembers, error: memberError } = await supabase
+            .from('group_members')
+            .select('*')
+            .eq('group_id', currentGroupId)
+            .eq('user_id', userId);
+
+        if (memberError) {
+            console.error('Member check error:', memberError);
+            showToast('Error checking membership', 'error');
+            return;
+        }
 
         if (existingMembers && existingMembers.length > 0) {
             showToast('User is already a member of this group!', 'error');
             return;
         }
 
+        console.log('Checking existing invites...');
         // Check if invite already exists
-        const { data: existingInvites } = await withTimeout(
-            supabase
-                .from('group_invites')
-                .select('*')
-                .eq('group_id', currentGroupId)
-                .eq('invitee_id', userId)
-                .eq('status', 'pending'),
-            5000
-        );
+        const { data: existingInvites, error: inviteCheckError } = await supabase
+            .from('group_invites')
+            .select('*')
+            .eq('group_id', currentGroupId)
+            .eq('invitee_id', userId)
+            .eq('status', 'pending');
+
+        if (inviteCheckError) {
+            console.error('Invite check error:', inviteCheckError);
+            showToast('Error checking existing invites', 'error');
+            return;
+        }
 
         if (existingInvites && existingInvites.length > 0) {
             showToast('Invitation already sent to this user!', 'error');
@@ -2074,19 +2082,17 @@ async function handleInviteToGroup(e) {
         const group = groups.find(g => g.id === currentGroupId);
         const groupName = group?.name || 'Unknown Group';
 
+        console.log('Creating invitation...');
         // Create invitation
-        const { data: inviteData, error } = await withTimeout(
-            supabase
-                .from('group_invites')
-                .insert({
-                    group_id: currentGroupId,
-                    inviter_id: currentUser.id,
-                    invitee_id: userId,
-                    status: 'pending'
-                })
-                .select(),
-            5000
-        );
+        const { data: inviteData, error } = await supabase
+            .from('group_invites')
+            .insert({
+                group_id: currentGroupId,
+                inviter_id: currentUser.id,
+                invitee_id: userId,
+                status: 'pending'
+            })
+            .select();
 
         if (error) {
             console.error('Invite error:', error);
@@ -2094,9 +2100,10 @@ async function handleInviteToGroup(e) {
             return;
         }
 
+        console.log('Creating notification...');
         // Create notification for the invitee
         const inviterName = currentUser.full_name || currentUser.email;
-        await addNotification(
+        const notificationResult = await addNotification(
             userId,
             'group_invite',
             'Group Invitation',
@@ -2109,8 +2116,15 @@ async function handleInviteToGroup(e) {
             }
         );
 
+        if (!notificationResult) {
+            console.warn('Notification creation failed, but invite was sent');
+        }
+
         showToast(`Invitation sent to ${userName}!`, 'success');
         closeInviteGroupModal();
+    } catch (err) {
+        console.error('Invite error:', err);
+        showToast('Error sending invitation: ' + err.message, 'error');
     } finally {
         submitButton.disabled = false;
         submitButton.textContent = 'Send Invitation';
