@@ -2614,24 +2614,28 @@ function updateExpensesDisplay() {
                             ${membersList.length > 0 ? `<p class="text-xs text-gray-500 mt-1">Members: ${membersHtml}</p>` : ''}
                         </div>
                     </div>
-                    <div class="flex gap-4 text-sm">
-                        <button onclick="openAddExpenseModal('${group.id}')"
-                            class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
-                            <span class="text-lg">+</span> Expense
-                        </button>
-                        <button onclick="openGroupSettlementModal('${group.id}')"
-                            class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
-                            <span class="text-lg">+</span> Settlement
-                        </button>
+                    <div class="flex flex-col gap-2 text-sm">
+                        <div class="flex gap-4">
+                            <button onclick="openAddExpenseModal('${group.id}')"
+                                class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
+                                <span class="text-lg">+</span> Expense
+                            </button>
+                            <button onclick="openGroupSettlementModal('${group.id}')"
+                                class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
+                                <span class="text-lg">+</span> Settlement
+                            </button>
+                        </div>
                         ${isAdmin ? `
-                            <button onclick="openEditGroupModal('${group.id}')"
-                                class="text-gray-600 hover:text-gray-900 font-medium transition">
-                                Edit
-                            </button>
-                            <button onclick="openInviteGroupModal('${group.id}')"
-                                class="text-gray-600 hover:text-gray-900 font-medium transition">
-                                Invite
-                            </button>
+                            <div class="flex gap-4">
+                                <button onclick="openEditGroupModal('${group.id}')"
+                                    class="text-gray-600 hover:text-gray-900 font-medium transition">
+                                    Edit
+                                </button>
+                                <button onclick="openInviteGroupModal('${group.id}')"
+                                    class="text-gray-600 hover:text-gray-900 font-medium transition">
+                                    Invite
+                                </button>
+                            </div>
                         ` : ''}
                     </div>
                 </div>
