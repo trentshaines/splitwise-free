@@ -965,7 +965,6 @@ function openEditExpenseModal(expenseId) {
     document.getElementById('edit-expense-description').value = expense.description;
     document.getElementById('edit-expense-amount').value = expense.amount;
     document.getElementById('edit-expense-currency').value = 'USD';
-    document.getElementById('edit-expense-paid-by').value = expense.paid_by;
     document.getElementById('edit-expense-split-type').value = expense.split_type;
     document.getElementById('edit-expense-group').value = expense.group_id || '';
 
@@ -977,13 +976,13 @@ function openEditExpenseModal(expenseId) {
         exactSection.classList.add('hidden');
     }
 
-    // Load participants with their share amounts
-    loadEditExpenseParticipants(expenseId);
+    // Load participants with their share amounts (will also set paid_by)
+    loadEditExpenseParticipants(expenseId, expense.paid_by);
 
     document.getElementById('edit-expense-modal').classList.remove('hidden');
 }
 
-async function loadEditExpenseParticipants(expenseId) {
+async function loadEditExpenseParticipants(expenseId, paidBy) {
     const { data, error } = await supabase
         .from('expense_participants')
         .select('user_id, share_amount')
@@ -1012,6 +1011,9 @@ async function loadEditExpenseParticipants(expenseId) {
         const name = user.full_name || user.email;
         paidBySelect.innerHTML += `<option value="${user.id}">${name}</option>`;
     });
+
+    // Set the paid by value after dropdown is populated
+    paidBySelect.value = paidBy;
 
     // Update participants checkboxes
     container.innerHTML = `
@@ -2321,12 +2323,161 @@ function openEditGroupModal(groupId) {
     document.getElementById('edit-group-name').value = group.name;
     document.getElementById('edit-group-description').value = group.description || '';
 
+    // Populate invite user dropdown
+    const inviteUserSelect = document.getElementById('edit-group-invite-user');
+    inviteUserSelect.innerHTML = '<option value="">Select a user...</option>';
+
+    // Get current group members
+    const groupMemberIds = (group.members || []).map(m => m.id);
+
+    // Filter out current user and existing group members
+    const availableUsers = allUsers.filter(u =>
+        u.id !== currentUser.id && !groupMemberIds.includes(u.id)
+    );
+
+    // Separate friends and non-friends
+    const friendIds = friends.map(f => f.id);
+    const friendUsers = availableUsers.filter(u => friendIds.includes(u.id));
+    const nonFriendUsers = availableUsers.filter(u => !friendIds.includes(u.id));
+
+    // Add friends optgroup
+    if (friendUsers.length > 0) {
+        const friendsGroup = document.createElement('optgroup');
+        friendsGroup.label = 'Friends';
+        friendUsers.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.full_name || user.email;
+            friendsGroup.appendChild(option);
+        });
+        inviteUserSelect.appendChild(friendsGroup);
+    }
+
+    // Add other users optgroup
+    if (nonFriendUsers.length > 0) {
+        const othersGroup = document.createElement('optgroup');
+        othersGroup.label = 'Other Users';
+        nonFriendUsers.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.full_name || user.email;
+            othersGroup.appendChild(option);
+        });
+        inviteUserSelect.appendChild(othersGroup);
+    }
+
     document.getElementById('edit-group-modal').classList.remove('hidden');
 }
 
 function closeEditGroupModal() {
     document.getElementById('edit-group-modal').classList.add('hidden');
     document.getElementById('edit-group-form').reset();
+}
+
+async function inviteUserFromEditModal() {
+    const form = document.getElementById('edit-group-form');
+    const groupId = form.dataset.groupId;
+    const userId = document.getElementById('edit-group-invite-user').value;
+
+    if (!userId) {
+        showToast('Please select a user to invite', 'error');
+        return;
+    }
+
+    if (userId === currentUser.id) {
+        showToast("You can't invite yourself!", 'error');
+        return;
+    }
+
+    try {
+        // Check if already a member
+        const { data: existingMembers, error: memberError } = await supabase
+            .from('group_members')
+            .select('*')
+            .eq('group_id', groupId)
+            .eq('user_id', userId);
+
+        if (memberError) {
+            console.error('Member check error:', memberError);
+            showToast('Error checking membership', 'error');
+            return;
+        }
+
+        if (existingMembers && existingMembers.length > 0) {
+            showToast('User is already a member of this group!', 'error');
+            return;
+        }
+
+        // Check if invite already exists
+        const { data: existingInvites, error: inviteCheckError } = await supabase
+            .from('group_invites')
+            .select('*')
+            .eq('group_id', groupId)
+            .eq('invitee_id', userId)
+            .eq('status', 'pending');
+
+        if (inviteCheckError) {
+            console.error('Invite check error:', inviteCheckError);
+            showToast('Error checking existing invites', 'error');
+            return;
+        }
+
+        if (existingInvites && existingInvites.length > 0) {
+            showToast('User has already been invited to this group!', 'error');
+            return;
+        }
+
+        // Create the invite
+        const { data: invite, error: insertError } = await supabase
+            .from('group_invites')
+            .insert({
+                group_id: groupId,
+                inviter_id: currentUser.id,
+                invitee_id: userId,
+                status: 'pending'
+            })
+            .select()
+            .single();
+
+        if (insertError) {
+            console.error('Insert error:', insertError);
+            showToast('Error sending invitation', 'error');
+            return;
+        }
+
+        // Get group and user info for notification
+        const group = groups.find(g => g.id === groupId);
+        const invitee = allUsers.find(u => u.id === userId);
+        const inviterName = currentUser.full_name || currentUser.email;
+
+        // Create notification
+        await addNotification(
+            userId,
+            'group_invite',
+            'Group Invitation',
+            `${inviterName} invited you to join "${group.name}"`,
+            {
+                group_id: groupId,
+                invite_id: invite.id,
+                inviter_id: currentUser.id,
+                group_name: group.name
+            }
+        );
+
+        showToast(`Invitation sent to ${invitee.full_name || invitee.email}!`, 'success');
+
+        // Reset the dropdown and refresh it
+        document.getElementById('edit-group-invite-user').value = '';
+
+        // Reload groups to update member list
+        await loadGroups();
+
+        // Reopen the modal with updated data
+        openEditGroupModal(groupId);
+    } catch (error) {
+        console.error('Unexpected error:', error);
+        showToast('An unexpected error occurred', 'error');
+    }
 }
 
 async function deleteGroupFromModal() {
@@ -2583,8 +2734,8 @@ function updateExpensesDisplay() {
         const membersHtml = membersList.map(m => {
             const name = m.full_name || m.email || 'Unknown';
             const isMe = m.id === currentUser.id;
-            const roleIcon = m.role === 'admin' ? '👑 ' : '';
-            return `<span class="text-xs ${isMe ? 'font-medium' : ''}">${roleIcon}${name}${isMe ? ' (You)' : ''}</span>`;
+            const isOwner = m.role === 'admin';
+            return `<span class="text-xs ${isMe ? 'font-medium' : ''} ${isOwner ? 'underline' : ''}">${name}${isMe ? ' (You)' : ''}</span>`;
         }).join(', ');
 
         // Calculate group balances including settlements
@@ -2599,23 +2750,37 @@ function updateExpensesDisplay() {
 
         html += `
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <div class="flex items-center gap-2 flex-1 cursor-pointer" onclick="toggleGroupCollapse('${group.id}')">
-                        <svg class="w-5 h-5 text-gray-500 transition-transform ${isCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        <div>
-                            <h3 class="text-lg font-semibold text-emerald-700">${group.name}</h3>
-                            ${group.description ? `<p class="text-sm text-gray-600">${group.description}</p>` : ''}
-                            <p class="text-xs text-gray-500 mt-1">
-                                ${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}
-                                ${groupSettlementsList.length > 0 ? ` • ${groupSettlementsList.length} settlement${groupSettlementsList.length !== 1 ? 's' : ''}` : ''}
-                            </p>
-                            ${membersList.length > 0 ? `<p class="text-xs text-gray-500 mt-1">Members: ${membersHtml}</p>` : ''}
+                <div class="mb-4">
+                    <div class="flex justify-between items-start">
+                        <div class="flex items-start gap-2 flex-1">
+                            <div class="cursor-pointer pt-1" onclick="toggleGroupCollapse('${group.id}')">
+                                <svg class="w-5 h-5 text-gray-500 transition-transform ${isCollapsed ? '' : 'rotate-90'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                </svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2">
+                                    <h3 class="text-lg font-semibold text-emerald-700">${group.name}</h3>
+                                    ${isAdmin ? `
+                                        <button onclick="openEditGroupModal('${group.id}')"
+                                            class="text-[0.9rem] hover:opacity-70">
+                                            ✏️
+                                        </button>
+                                    ` : ''}
+                                </div>
+                                ${group.description ? `<p class="text-sm text-gray-600">${group.description}</p>` : ''}
+                                <p class="text-xs text-gray-500 mt-1">
+                                    ${groupExpensesList.length} expense${groupExpensesList.length !== 1 ? 's' : ''}
+                                    ${groupSettlementsList.length > 0 ? ` • ${groupSettlementsList.length} settlement${groupSettlementsList.length !== 1 ? 's' : ''}` : ''}
+                                </p>
+                                ${membersList.length > 0 ? `
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        Members: ${membersHtml}
+                                    </p>
+                                ` : ''}
+                            </div>
                         </div>
-                    </div>
-                    <div class="flex flex-col gap-2 text-sm">
-                        <div class="flex gap-4">
+                        <div class="flex gap-3 text-sm ml-4">
                             <button onclick="openAddExpenseModal('${group.id}')"
                                 class="text-gray-600 hover:text-gray-900 font-medium transition flex items-center gap-1">
                                 <span class="text-lg">+</span> Expense
@@ -2625,23 +2790,11 @@ function updateExpensesDisplay() {
                                 <span class="text-lg">+</span> Settlement
                             </button>
                         </div>
-                        ${isAdmin ? `
-                            <div class="flex gap-4">
-                                <button onclick="openEditGroupModal('${group.id}')"
-                                    class="text-gray-600 hover:text-gray-900 font-medium transition">
-                                    Edit
-                                </button>
-                                <button onclick="openInviteGroupModal('${group.id}')"
-                                    class="text-gray-600 hover:text-gray-900 font-medium transition">
-                                    Invite
-                                </button>
-                            </div>
-                        ` : ''}
                     </div>
-                </div>
 
-                <!-- Group Balance Summary -->
-                ${groupBalanceHtml}
+                    <!-- Group Balance Summary -->
+                    ${groupBalanceHtml}
+                </div>
 
                 <!-- Divider -->
                 <div class="border-t border-gray-200 my-4 ${isCollapsed ? 'hidden' : ''}"></div>
@@ -2687,18 +2840,18 @@ function renderExpenseCard(expense) {
     return `
         <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
             <div class="flex-1">
-                <p class="font-medium">${expense.description}</p>
+                <div class="flex items-center gap-2">
+                    <p class="font-medium">${expense.description}</p>
+                    <button onclick="openEditExpenseModal('${expense.id}')"
+                        class="text-[0.8rem] hover:opacity-70">✏️</button>
+                </div>
                 <p class="text-sm text-gray-600">Paid by ${payerName} • ${date}</p>
                 <p class="text-xs text-gray-500 mt-1">Split: ${participantNames}</p>
             </div>
             <div class="text-right">
-                <div class="flex flex-col items-end mb-2">
+                <div class="flex flex-col items-end">
                     <p class="font-semibold text-blue-600">$${expense.amount.toFixed(2)}</p>
                     <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
-                </div>
-                <div class="flex gap-2 justify-end">
-                    <button onclick="openEditExpenseModal('${expense.id}')"
-                        class="text-xs text-blue-600 hover:text-blue-700">Edit</button>
                 </div>
             </div>
         </div>
@@ -2721,7 +2874,11 @@ function renderSettlementCard(settlement) {
     return `
         <div class="flex justify-between items-center p-3 border border-gray-200 rounded-md">
             <div class="flex-1">
-                <p class="font-medium">Settlement</p>
+                <div class="flex items-center gap-2">
+                    <p class="font-medium">Settlement</p>
+                    <button onclick="openEditSettlementModal('${settlement.id}')"
+                        class="text-[0.8rem] hover:opacity-70">✏️</button>
+                </div>
                 <p class="text-sm text-gray-600">
                     ${isCurrentUserPayer
                         ? `${fromName} paid ${toName}`
@@ -2730,13 +2887,9 @@ function renderSettlementCard(settlement) {
                 </p>
             </div>
             <div class="text-right">
-                <div class="flex flex-col items-end mb-2">
+                <div class="flex flex-col items-end">
                     <p class="font-semibold text-blue-600">$${settlement.amount.toFixed(2)}</p>
                     <p class="text-sm ${myBalanceColor}">(${myBalanceSign}$${Math.abs(myBalance).toFixed(2)})</p>
-                </div>
-                <div class="flex gap-2 justify-end">
-                    <button onclick="openEditSettlementModal('${settlement.id}')"
-                        class="text-xs text-blue-600 hover:text-blue-700">Edit</button>
                 </div>
             </div>
         </div>
