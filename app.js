@@ -3,7 +3,6 @@ let currentUser = null;
 let friends = [];
 let allUsers = [];
 let expenses = [];
-let currentTheme = 'emerald';
 let groups = [];
 let groupSettlements = []; // Track group settlements
 let currentGroupId = null;
@@ -85,9 +84,6 @@ function updateEditConversionPreview() {
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
-    // Load saved theme
-    loadTheme();
-
     // Check if user is already logged in
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
@@ -2767,38 +2763,6 @@ function showToast(message, type = 'info') {
             container.removeChild(toast);
         }, 300);
     }, 3000);
-}
-
-// ============ THEME FUNCTIONS ============
-
-function loadTheme() {
-    const savedTheme = localStorage.getItem('splitwiser-theme') || 'emerald';
-    currentTheme = savedTheme;
-    applyTheme(savedTheme);
-
-    // Set dropdown value
-    const selector = document.getElementById('theme-selector');
-    if (selector) {
-        selector.value = savedTheme;
-    }
-}
-
-function changeTheme(theme) {
-    currentTheme = theme;
-    localStorage.setItem('splitwiser-theme', theme);
-    applyTheme(theme);
-    showToast(`Theme changed to ${theme}!`, 'success');
-}
-
-function applyTheme(theme) {
-    // Remove all theme classes
-    document.body.classList.remove('theme-emerald', 'theme-artdeco');
-
-    // Add new theme class
-    document.body.classList.add(`theme-${theme}`);
-
-    // Also set data attribute for additional CSS targeting if needed
-    document.body.setAttribute('data-theme', theme);
 }
 
 // ===========================

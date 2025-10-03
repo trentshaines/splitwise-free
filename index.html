@@ -69,73 +69,6 @@
             --secondary-700: 29, 78, 216;
         }
 
-        .theme-artdeco {
-            --primary-50: 255, 250, 240;
-            --primary-100: 255, 243, 224;
-            --primary-200: 254, 230, 189;
-            --primary-300: 253, 213, 149;
-            --primary-400: 251, 191, 102;
-            --primary-500: 218, 165, 32;
-            --primary-600: 184, 134, 11;
-            --primary-700: 146, 107, 12;
-            --primary-800: 120, 88, 15;
-            --primary-900: 101, 74, 18;
-            --secondary-600: 139, 92, 246;
-            --secondary-700: 124, 58, 237;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
-        }
-
-        .theme-artdeco .bg-gray-50 {
-            background: linear-gradient(135deg, rgba(218, 165, 32, 0.05) 0%, rgba(184, 134, 11, 0.05) 100%) !important;
-            border: 1px solid rgba(218, 165, 32, 0.2);
-        }
-
-        .theme-artdeco .bg-white {
-            background: linear-gradient(135deg, #2a2438 0%, #3a3550 100%) !important;
-            border: 1px solid rgba(218, 165, 32, 0.3);
-        }
-
-        .theme-artdeco .text-gray-600 {
-            color: #c9a961 !important;
-        }
-
-        .theme-artdeco .text-gray-700 {
-            color: #e6c969 !important;
-        }
-
-        .theme-artdeco .text-gray-900 {
-            color: #f4d889 !important;
-        }
-
-        .theme-artdeco .text-gray-500 {
-            color: #b39a5e !important;
-        }
-
-        .theme-artdeco .border-gray-200 {
-            border-color: rgba(218, 165, 32, 0.3) !important;
-        }
-
-        .theme-artdeco .border-gray-300 {
-            border-color: rgba(218, 165, 32, 0.4) !important;
-        }
-
-        .theme-artdeco header {
-            background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%) !important;
-            border-bottom: 2px solid #daa520 !important;
-        }
-
-        .theme-artdeco .notification-item:hover {
-            background-color: rgba(218, 165, 32, 0.1) !important;
-        }
-
-        .theme-artdeco .notification-unread {
-            background-color: rgba(218, 165, 32, 0.15) !important;
-        }
-
-        .theme-artdeco #notifications-dropdown {
-            background: linear-gradient(135deg, #1f2937 0%, #374151 100%) !important;
-            border-color: rgba(218, 165, 32, 0.5) !important;
-        }
 
         /* Universal theme color overrides */
         .bg-emerald-600, .bg-emerald-700,
@@ -210,73 +143,6 @@
             color: inherit;
         }
 
-        /* Art Deco text selection highlight - use gold */
-        .theme-artdeco ::selection {
-            background-color: rgba(218, 165, 32, 0.4);
-            color: #1a1a2e;
-        }
-
-        .theme-artdeco ::-moz-selection {
-            background-color: rgba(218, 165, 32, 0.4);
-            color: #1a1a2e;
-        }
-
-        /* Art Deco: Fix blue/purple buttons to gold */
-        .theme-artdeco .bg-blue-600 {
-            background-color: #b8860b !important;
-        }
-
-        .theme-artdeco .hover\:bg-blue-700:hover,
-        .theme-artdeco .bg-blue-600:hover {
-            background-color: #926b0a !important;
-        }
-
-        .theme-artdeco .bg-purple-600 {
-            background-color: #daa520 !important;
-        }
-
-        .theme-artdeco .hover\:bg-purple-700:hover,
-        .theme-artdeco .bg-purple-600:hover {
-            background-color: #b8860b !important;
-        }
-
-        /* Art Deco: Fix blue text amounts and links to gold */
-        .theme-artdeco .text-blue-600 {
-            color: #f4d889 !important;
-        }
-
-        .theme-artdeco .hover\:text-blue-700:hover,
-        .theme-artdeco .text-blue-600:hover {
-            color: #e6c969 !important;
-        }
-
-        /* Art Deco: Fix expense/settlement titles to gold */
-        .theme-artdeco .font-medium {
-            color: #f4d889 !important;
-        }
-
-        /* Art Deco: Fix section titles to gold */
-        .theme-artdeco .font-semibold {
-            color: #f4d889 !important;
-        }
-
-        /* Art Deco: Ensure no black text appears */
-        .theme-artdeco * {
-            color: inherit;
-        }
-
-        /* Art Deco: Fix blue info boxes to gold */
-        .theme-artdeco .bg-blue-50 {
-            background-color: rgba(218, 165, 32, 0.1) !important;
-        }
-
-        .theme-artdeco .border-blue-200 {
-            border-color: rgba(218, 165, 32, 0.3) !important;
-        }
-
-        .theme-artdeco .text-blue-700 {
-            color: #e6c969 !important;
-        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -353,13 +219,6 @@
                 <h1 class="text-2xl logo-font app-brand">Splitwiser</h1>
                 <div class="flex items-center gap-4">
                     <span id="user-display" class="text-sm text-gray-600"></span>
-
-                    <!-- Theme Picker -->
-                    <select id="theme-selector" onchange="changeTheme(this.value)"
-                        class="text-xs px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white text-gray-700">
-                        <option value="emerald">🌿 Default</option>
-                        <option value="artdeco">✨ Art Deco</option>
-                    </select>
 
                     <!-- Notifications Bell -->
                     <div class="relative">
