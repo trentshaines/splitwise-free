@@ -494,7 +494,21 @@ async function handleAddFriend(e) {
 // ============ EXPENSES FUNCTIONS ============
 
 async function loadExpenses() {
-    const { data, error } = await supabase
+    // Get all group IDs where user is a member
+    const { data: userGroups, error: groupsError } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', currentUser.id);
+
+    if (groupsError) {
+        console.error('Error loading user groups:', groupsError);
+        return;
+    }
+
+    const userGroupIds = userGroups ? userGroups.map(g => g.group_id) : [];
+
+    // Load expenses where user is a participant
+    const { data: participantExpenses, error } = await supabase
         .from('expense_participants')
         .select(`
             expense_id,
@@ -516,15 +530,52 @@ async function loadExpenses() {
         .eq('user_id', currentUser.id);
 
     if (error) {
-        console.error('Error loading expenses:', error);
+        console.error('Error loading participant expenses:', error);
         return;
     }
 
-    // Remove duplicates and flatten
+    // Load ALL expenses from groups where user is a member
+    let groupExpenses = [];
+    if (userGroupIds.length > 0) {
+        const { data: allGroupExpenses, error: groupExpError } = await supabase
+            .from('expenses')
+            .select(`
+                id,
+                description,
+                amount,
+                paid_by,
+                split_type,
+                group_id,
+                created_at,
+                payer:paid_by (
+                    id,
+                    email,
+                    full_name
+                )
+            `)
+            .in('group_id', userGroupIds);
+
+        if (groupExpError) {
+            console.error('Error loading group expenses:', groupExpError);
+        } else {
+            groupExpenses = allGroupExpenses || [];
+        }
+    }
+
+    // Combine and remove duplicates
     const expenseMap = new Map();
-    data.forEach(item => {
+
+    // Add participant expenses
+    participantExpenses.forEach(item => {
         if (item.expenses && !expenseMap.has(item.expenses.id)) {
             expenseMap.set(item.expenses.id, item.expenses);
+        }
+    });
+
+    // Add all group expenses
+    groupExpenses.forEach(expense => {
+        if (!expenseMap.has(expense.id)) {
+            expenseMap.set(expense.id, expense);
         }
     });
 
