@@ -915,19 +915,7 @@ async function deleteExpense(expenseId) {
         return;
     }
 
-    // Delete expense participants first
-    const { error: participantsError } = await supabase
-        .from('expense_participants')
-        .delete()
-        .eq('expense_id', expenseId);
-
-    if (participantsError) {
-        showToast('Error deleting expense participants', 'error');
-        console.error(participantsError);
-        return;
-    }
-
-    // Delete expense
+    // Delete expense (CASCADE will automatically delete participants)
     const { error: expenseError } = await supabase
         .from('expenses')
         .delete()
@@ -1566,6 +1554,13 @@ function closeGroupSettlementModal() {
 }
 
 async function openEditSettlementModal(settlementId) {
+    // Validate settlementId
+    if (!settlementId || settlementId === 'null' || settlementId === 'undefined') {
+        showToast('Invalid settlement ID', 'error');
+        console.error('Invalid settlementId:', settlementId);
+        return;
+    }
+
     // Find the settlement in groupSettlements
     const settlement = groupSettlements.find(s => s.id === settlementId);
     if (!settlement) {
@@ -1719,6 +1714,13 @@ async function handleGroupSettlement(e) {
 }
 
 async function deleteSettlement(settlementId) {
+    // Validate settlementId
+    if (!settlementId || settlementId === 'null' || settlementId === 'undefined') {
+        showToast('Invalid settlement - cannot delete', 'error');
+        console.error('Invalid settlementId for deletion:', settlementId);
+        return;
+    }
+
     if (!confirm('Are you sure you want to delete this settlement? This cannot be undone.')) {
         return;
     }
@@ -1747,11 +1749,14 @@ async function deleteSettlementFromModal() {
         return;
     }
 
+    // Save the ID before closing modal (which clears editingSettlementId)
+    const settlementId = editingSettlementId;
+
     // Close the modal first
     closeGroupSettlementModal();
 
-    // Then call the delete function
-    await deleteSettlement(editingSettlementId);
+    // Then call the delete function with saved ID
+    await deleteSettlement(settlementId);
 }
 
 // ============ HISTORY SNAPSHOT FUNCTIONS ============
@@ -2859,6 +2864,12 @@ function renderExpenseCard(expense) {
 }
 
 function renderSettlementCard(settlement) {
+    // Skip rendering if settlement has invalid data
+    if (!settlement.id) {
+        console.warn('Skipping settlement with null ID:', settlement);
+        return '';
+    }
+
     const date = new Date(settlement.created_at).toLocaleDateString();
     const fromUser = settlement.from_profile;
     const toUser = settlement.to_profile;
