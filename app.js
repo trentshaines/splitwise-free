@@ -577,6 +577,8 @@ async function loadExpenses() {
 
     expenses = Array.from(expenseMap.values());
 
+    console.log('🔍 DEBUG: Loaded expenses:', expenses.map(e => ({ id: e.id, desc: e.description, amount: e.amount })));
+
     // Sort by most recent first (descending order)
     expenses.sort((a, b) => {
         const dateA = new Date(a.created_at).getTime();
@@ -1107,14 +1109,19 @@ async function handleEditExpense(e) {
         const splitType = document.getElementById('edit-expense-split-type').value;
         const groupId = document.getElementById('edit-expense-group').value || null;
 
+        console.log('🔍 DEBUG: Starting handleEditExpense', { originalAmount, currency, splitType });
+
         // Convert to USD
         const amount = convertToUSD(originalAmount, currency);
 
         const selectedParticipants = Array.from(document.querySelectorAll('.edit-participant-checkbox:checked'))
             .map(cb => cb.value);
 
+        console.log('🔍 DEBUG: Selected participants', selectedParticipants);
+
         if (selectedParticipants.length === 0) {
             showToast('Please select at least one participant', 'error');
+            console.log('🔍 DEBUG: No participants selected - returning early');
             return;
         }
 
@@ -1142,11 +1149,14 @@ async function handleEditExpense(e) {
 
         let shares = {};
 
+        console.log('🔍 DEBUG: Calculating shares for split type:', splitType);
+
         if (splitType === 'equal') {
             const shareAmount = amount / selectedParticipants.length;
             selectedParticipants.forEach(userId => {
                 shares[userId] = shareAmount;
             });
+            console.log('🔍 DEBUG: Equal split shares calculated', shares);
         } else {
             // Exact amounts
             const exactInputs = document.querySelectorAll('.edit-exact-amount-input');
@@ -1158,8 +1168,11 @@ async function handleEditExpense(e) {
                 total += share;
             });
 
+            console.log('🔍 DEBUG: Exact amounts validation', { total, originalAmount, difference: Math.abs(total - originalAmount) });
+
             if (Math.abs(total - originalAmount) > 0.01) {
                 showToast(`Amounts must add up to ${originalAmount.toFixed(2)} ${currency}. Current total: ${total.toFixed(2)} ${currency}`, 'error');
+                console.log('🔍 DEBUG: VALIDATION FAILED - returning early');
                 return;
             }
             // Convert exact shares to USD
@@ -1169,7 +1182,10 @@ async function handleEditExpense(e) {
         }
 
         // Update expense
-        const { error: expenseError } = await supabase
+        console.log('🔍 DEBUG: Updating expense', { expenseId, originalAmount, currency, convertedAmount: amount, description });
+        showToast(`DEBUG: Saving amount ${amount.toFixed(2)} USD (original: ${originalAmount} ${currency})`, 'success');
+
+        const { data: updateResult, error: expenseError } = await supabase
             .from('expenses')
             .update({
                 description,
@@ -1178,12 +1194,20 @@ async function handleEditExpense(e) {
                 split_type: splitType,
                 group_id: groupId
             })
-            .eq('id', expenseId);
+            .eq('id', expenseId)
+            .select();
+
+        console.log('🔍 DEBUG: Update result', { updateResult, expenseError });
 
         if (expenseError) {
             showToast('Error updating expense', 'error');
             console.error(expenseError);
             return;
+        }
+
+        if (!updateResult || updateResult.length === 0) {
+            console.error('🔍 DEBUG: No rows were updated!');
+            showToast('Warning: Expense may not have been updated', 'error');
         }
 
         // Delete old participants
@@ -2822,6 +2846,8 @@ function updateExpensesDisplay() {
 }
 
 function renderExpenseCard(expense) {
+    console.log('🔍 DEBUG: Rendering expense card:', { id: expense.id, desc: expense.description, amount: expense.amount, participants: expense.participants?.map(p => ({ id: p.id, share: p.share_amount })) });
+
     const date = new Date(expense.created_at).toLocaleDateString();
     const payer = allUsers.find(u => u.id === expense.paid_by) || currentUser;
     const payerName = expense.paid_by === currentUser.id ? 'You' : (payer.full_name || payer.email);
